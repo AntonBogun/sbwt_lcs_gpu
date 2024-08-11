@@ -1,0 +1,1 @@
+./build/bin/sbwt_lcs_gpu -sbwt ./data/index.tdbg

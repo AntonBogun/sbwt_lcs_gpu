@@ -1,0 +1,5 @@
+#pragma once
+#include "utils.h"
+namespace sbwt_lcs_gpu {
+
+}//namespace sbwt_lcs_gpu
