@@ -4,7 +4,23 @@
 #include <condition_variable>
 #include <queue>
 namespace sbwt_lcs_gpu {
-
+template<typename vector_pair_T>
+std::string debug_print_hint(vector_pair_T& hint){
+    std::stringstream ss;
+    ss<<"[";
+    for(i32 i=0; i<hint.size(); i++){
+        ss << "(" << hint[i].first << "," << hint[i].second << ")";
+        if(i<hint.size()-1) ss << ",";
+    }
+    ss<<"]";
+    return ss.str();
+}
+template<typename pair_T>
+std::string to_string_pair(const pair_T& pair){
+    std::stringstream ss;
+    ss << "(" << pair.first << "," << pair.second << ")";
+    return ss.str();
+}
 //for non-negative and monotonic unique ids
 class ConditionVariableWithCounter {
 public:
@@ -214,7 +230,7 @@ class SharedThreadMultistream {
 
     //init data, self_hint, id_map, cvs, q, write_chunk_size
     SharedThreadMultistream(i64 stream_size, i32 num_streams, i32 max_readers, i32 max_writers,
-        i32 max_readers_per_stream, i32 max_writers_per_stream, i64 write_chunk_size): data(num_streams), self_hint(num_streams), id_map(num_streams), cvs(max_readers+max_writers){
+        i32 max_readers_per_stream, i32 max_writers_per_stream): data(num_streams), self_hint(num_streams), id_map(num_streams), cvs(max_readers+max_writers){
         for(i32 i=0; i<num_streams; i++){
             // data.emplace_back(stream_size, max_writers_per_stream, max_readers_per_stream, write_chunk_size);
             static_cast<impl*>(this)->emplace_back_data(stream_size, max_writers_per_stream, max_readers_per_stream);
@@ -534,7 +550,8 @@ class MS_Worker {//MultiStream_Worker
                 std::unique_lock<std::mutex> lock(MS_r.m);
                 //WAIT_CONDITION
                 MS_r.cv_S0.wait(lock, [
-                    this,&indx,&res,&was_begin,&thread_id,&thread_indx
+                    // this,&indx,&res,&was_begin,&thread_id,&thread_indx
+                    this,&indx,&res,&was_begin
                 ](){//wait for exit or allocation or read availability
                     if(MS_r.exit){
                         res=EXIT;
@@ -898,7 +915,7 @@ class MS_Worker {//MultiStream_Worker
                         << ", failed_reservation " << failed_reservation
                         << ", new_alloc_hint " << new_alloc_hint
                         << ", new_hint " << to_string_pair(new_hint)<<"\n";
-                        debug_object->dump(&MS_r.m, ss.str());
+                        // debug_object->dump(&MS_r.m, ss.str());
                         throw e;
                     }
                     // syncprint(debug_str<<" update_id_map after "<<id<<","<<step);
@@ -991,6 +1008,9 @@ class MS_Worker {//MultiStream_Worker
                     B_r.v_w+=consumed.first;//actual amount read
                     B_r.template step<S0_buf>(consumed.first-r_size);//if consumed less than r_size, step back
                     B_r.v_r+=r_size-consumed.first;//undo too much read
+
+                    r_size=consumed.first;//give correct amount to sequential_ended and no_write_ended
+
                     if(consumed.first<r_size){
                         B_r.state=UNBLOCKED;
                     }

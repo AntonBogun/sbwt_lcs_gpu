@@ -3,16 +3,143 @@
 #include <vector>
 #include <thread>
 #include <cstdlib>
-#include "SBWT.hpp"
 #include "gpu/kernels.h"
 #include "utils.h"
+#include "SBWT.hpp"
+
 #include <omp.h>
 #include "balance_files.hpp"
 #include "sanity_test.h"
+#include "timer.hpp"
+#include <iomanip>
+
+#include "circular_impl.hpp"
+
+namespace sbwt_lcs_gpu {
+    //have to define these in a cpp file
+    u64 num_physical_streams;
+    u64 FileBufMS::u64s = 0;
+    u64 ParseMS::u64s = 0;
+    u64 WriteBufMS::u64s = 0;
+
+    u64 ParseMS::data_offset = 0;
+    u64 MultiplexMS::data_offset = 0;
+    u64 DemultiplexMS::data_offset = 0;
+    u64 WriteBufMS::data_offset = 0;
+    u64 MemoryPositions::total = 0;
+    // u64 MemoryPositions::gpu = 0;
+    i32 FileReadMS::num_threads = 0;
+    i32 FileBufMS::num_threads = 0;
+    i32 ParseMS::num_threads = 0;
+    i32 MultiplexMS::num_threads = 0; 
+    i32 DemultiplexMS::num_threads = 0;
+    i32 WriteBufMS::num_threads = 0;
+    i32 total_threads = 0;
+}//namespace sbwt_lcs_gpu
+using namespace sbwt_lcs_gpu;
+
+std::tuple<float, int, std::string> bytesToHumanReadable(uint64_t bytes) {
+    const char* units[] = {"B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"};
+    int multiplier = 0;
+    float size = static_cast<float>(bytes);
+
+    while (size >= 1024 && multiplier < 8) {
+        size /= 1024;
+        multiplier++;
+    }
+
+    // Round to 2 decimal places
+    // size = std::round(size * 100) / 100;
+    
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(multiplier>0?3:0) << size << " " << units[multiplier];
+
+    return std::make_tuple(size, multiplier, oss.str());
+}
+std::string formatSection(const std::string& sectionName, const std::vector<std::pair<std::string, u64>>& variables) {
+    std::ostringstream oss;
+    oss << sectionName << ":\n";
+    for (const auto& [varName, value] : variables) {
+        auto [_, mult, readable] = bytesToHumanReadable(value * sizeof(u64));
+        // oss << varName << ": " << value << " u64s (" << readable << ")\n";
+        oss << varName << ": " << value << " (" << readable << ")\n";
+    }
+    oss << "\n";
+    return oss.str();
+}
+
+std::string formatAllSections() {
+    std::ostringstream oss;
+
+    // FileBufSection
+    oss << formatSection("FileBufSection", {
+        {"batch_u64s", FileBufStream::batch_u64s},
+        {"stream_u64s", FileBufStream::u64s},
+        {"u64s", FileBufMS::u64s},
+        {"offset",FileBufMS::data_offset}
+    });
+
+    // ParseSection
+    oss << formatSection("ParseSection", {
+        {"chars_batch_u64s", ParseStream::chars_batch_u64s},
+        {"seps_batch_u64s", ParseStream::seps_batch_u64s},
+        {"seps_bitvector_batch_u64s", ParseStream::seps_bitvector_batch_u64s},
+        {"seps_rank_batch_u64s", ParseStream::seps_rank_batch_u64s},
+        {"batch_u64s", ParseStream::batch_u64s},
+        {"stream_u64s", ParseStream::u64s},
+        {"u64s", ParseMS::u64s},
+        {"offset",ParseMS::data_offset}
+    });
+
+    // MultiplexSection
+    oss << formatSection("MultiplexSection", {
+        {"chars_batch_section_u64s", MultiplexStream::chars_batch_section_u64s},
+        {"seps_batch_section_u64s", MultiplexStream::seps_batch_section_u64s},
+        {"seps_bitvector_batch_section_u64s", MultiplexStream::seps_bitvector_batch_section_u64s},
+        {"seps_rank_batch_section_u64s", MultiplexStream::seps_rank_batch_section_u64s},
+        {"thread_lookup_vector_u64s", MultiplexStream::thread_lookup_vector_u64s},
+        {"batch_section_u64s", MultiplexStream::batch_section_u64s},
+        {"stream_u64s", MultiplexStream::u64s},
+        {"u64s", MultiplexMS::u64s},
+        {"offset",MultiplexMS::data_offset}
+    });
+
+    // GPUSection
+    oss << formatSection("GPUSection", {
+        {"in_batch_u64s", GPUSection::in_batch_u64s},
+        {"out_batch_u64s", GPUSection::out_batch_u64s},
+        {"in_u64s", GPUSection::in_u64s},
+        {"out_u64s", GPUSection::out_u64s},
+        {"u64s", GPUSection::u64s}
+    });
+
+    // DemultiplexSection
+    oss << formatSection("DemultiplexSection", {
+        {"indexes_batch_u64s", DemultiplexStream::indexes_batch_u64s},
+        {"stream_u64s", DemultiplexStream::u64s},
+        {"u64s", DemultiplexMS::u64s},
+        {"offset",DemultiplexMS::data_offset}
+    });
+
+    // WriteBufSection
+    oss << formatSection("WriteBufSection", {
+        {"batch_u64s", WriteBufStream::batch_u64s},
+        {"stream_u64s", WriteBufStream::u64s},
+        {"u64s", WriteBufMS::u64s},
+        {"offset",WriteBufMS::data_offset}
+    });
+    // u64 total_no_gpu = FileBufMS::u64s + ParseMS::u64s + MultiplexMS::u64s + DemultiplexMS::u64s + WriteBufMS::u64s;
+    oss << formatSection("Total", {
+        {"no_gpu", MemoryPositions::total},
+        {"gpu", GPUSection::u64s},
+        {"total", MemoryPositions::total + GPUSection::u64s}
+    });
+
+    return oss.str();
+}
 
 constexpr int error_exit_code = -1;
 
-using namespace sbwt_lcs_gpu;
 int cerr_and_return(const std::string msg, int exit_code) {
     std::cerr << msg << std::endl;
     return exit_code;
@@ -179,8 +306,8 @@ int main(int argc, char *argv[]) {
 
 
     auto streams=balance_files(in_files, out_files);
-
-
+    num_physical_streams=min(streams.size(),max_num_physical_streams); 
+    update_sections();
 
     //print out the files
     std::cout << "sbwt_file: " << sbwt_file << std::endl;
@@ -201,8 +328,18 @@ int main(int argc, char *argv[]) {
     }
 
     //print free cpu and gpu memory
-    std::cout << "free_cpu_memory: " << get_free_cpu_memory() << std::endl;
-    std::cout << "free_gpu_memory: " << get_free_gpu_memory() << std::endl;
+    enum class DeviceType {
+        CPU,
+        GPU
+    };
+    auto print_mem = [](DeviceType device) {
+        auto [size, mult, readable] = bytesToHumanReadable(device == DeviceType::CPU ? get_free_cpu_memory() : get_free_gpu_memory());
+        std::cout << (device == DeviceType::CPU ? "CPU" : "GPU") << " free memory: " << readable << std::endl;
+    };
+    // std::cout << "free_cpu_memory: " << get_free_cpu_memory() << std::endl;
+    // std::cout << "free_gpu_memory: " << get_free_gpu_memory() << std::endl;
+    print_mem(DeviceType::CPU);
+    print_mem(DeviceType::GPU);
 
     // print the supported cuda devices
     // print_supported_devices();
@@ -228,7 +365,6 @@ int main(int argc, char *argv[]) {
     std::cout << "free_cpu_memory: " << get_free_cpu_memory() << std::endl;
     std::cout << "free_gpu_memory: " << get_free_gpu_memory() << std::endl;
 
-    std::cout << "num_cpu_threads: " << num_cpu_threads << std::endl;
     //print slurm variables
     // const char* slurm_cpus_per_task = std::getenv("SLURM_CPUS_PER_TASK");
     // std::cout << "SLURM_CPUS_PER_TASK: " << (slurm_cpus_per_task == nullptr ? "null" : slurm_cpus_per_task) << std::endl;
@@ -242,13 +378,41 @@ int main(int argc, char *argv[]) {
     // std::cout << "SLURM_MEM_PER_CPU: " << (slurm_mem_per_cpu == nullptr ? "null" : slurm_mem_per_cpu) << std::endl;
     SBWTContainerGPU sbwt_gpu(sbwt_cpu);
     std::cout << "built gpu sbwt" << std::endl;
-    std::cout << "free_cpu_memory: " << get_free_cpu_memory() << std::endl;
-    std::cout << "free_gpu_memory: " << get_free_gpu_memory() << std::endl;
+    // std::cout << "free_cpu_memory: " << get_free_cpu_memory() << std::endl;
+    // std::cout << "free_gpu_memory: " << get_free_gpu_memory() << std::endl;
+    print_mem(DeviceType::CPU);
+    print_mem(DeviceType::GPU);
 
     sbwt_cpu.clear();//not needed anymore
     std::cout << "cleared cpu sbwt" << std::endl;
+    // std::cout << "free_cpu_memory: " << get_free_cpu_memory() << std::endl;
+    // std::cout << "free_gpu_memory: " << get_free_gpu_memory() << std::endl;
+    print_mem(DeviceType::CPU);
+    print_mem(DeviceType::GPU);
+    std::cout<<"\n\n";
+    std::cout << formatAllSections() << std::endl;
+    //make sure enough memory
+    if(get_free_cpu_memory() < 1.1*MemoryPositions::total * sizeof(u64)){
+        return cerr_and_return("Not enough free CPU memory", error_exit_code);
+    }
+    if(get_free_gpu_memory() < 1.05*GPUSection::u64s * sizeof(u64)){
+        return cerr_and_return("Not enough free GPU memory", error_exit_code);
+    }
+    //allocate memory
+    Timer timer;
+    timer.start("allocating memory");
+    std::vector<u64> memory(MemoryPositions::total);
+    timer.stop("allocating memory");
+    timer.start("allocating gpu memory");
+    GpuPointer<u64> gpu_memory(GPUSection::u64s);
+    timer.stop("allocating gpu memory");
+    std::cout << "allocated memory" << std::endl;
     std::cout << "free_cpu_memory: " << get_free_cpu_memory() << std::endl;
     std::cout << "free_gpu_memory: " << get_free_gpu_memory() << std::endl;
+
+    std::cout << "threads available: " << num_cpu_threads << std::endl;
+    std::cout << "total threads: " << total_threads << std::endl;
+
 
     // uint64_t size = static_cast<uint64_t>(2) * 1024 * 1024 * 1024 / sizeof(uint64_t);
     // std::vector<uint64_t> array(size);
@@ -310,3 +474,4 @@ int main(int argc, char *argv[]) {
 // cuobjdump -sass main.cubin > main.sass
 
 // nvcc -gencode arch=compute_80,code=sm_80 -x cu main.cpp --cubin && cuobjdump -sass main.cubin > main.sass
+// script -q -c "./release.sh" build_out.log

@@ -10,11 +10,13 @@
 #SBATCH --mem=64G
 
 #higher gcccore breaks nvcc
-module load GCCcore/11.3.0 CUDA/12.4.0 cmake/3.24.2
+# module load GCCcore/11.3.0 CUDA/12.4.0 cmake/3.24.2
+module load Python/3.10.4-GCCcore-11.3.0 CUDA/12.4.0 cmake/3.24.2 #match user environment to avoid location mismatch 
+
 
 echo "Start on $(date)"
 echo ""
-
+# echo "$PATH"
 # for i in 1 2 4 15 30
 # # for i in 1
 # do
@@ -46,6 +48,7 @@ if [ "$PWD" != "$required_dir" ]; then
 fi
 
 ./release.sh || { echo 'release failed' ; exit 1;}
+# echo | cpp -fopenmp -dM | grep -i open
 # ./build/bin/sbwt_lcs_gpu
 # ./build/bin/sbwt_lcs_gpu -sbwt ./data/index.tdbg -i a -i b -o d c
 # ./build/bin/sbwt_lcs_gpu -sbwt ./data/index.tdbg -if ./data/filelist.txt -of ./data/fileout_list.txt

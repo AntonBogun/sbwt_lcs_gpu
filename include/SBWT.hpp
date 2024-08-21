@@ -88,10 +88,10 @@ class SBWTContainerCPU : public SBWTContainer {
             u64 pos = vectors_start_position + sizeof(u64) + i * (bitvector_bytes + sizeof(u64));
             st.seekg(static_cast<std::ios::off_type>(pos), std::ios::beg);
 
-            bitvectors[i] = std::vector<u64>(bitvector_bytes / sizeof(u64));
+            bitvectors[i] = std::vector<u64>(bitvector_bytes / sizeof(u64) + bitvector_pad_u64s);
             st.read(reinterpret_cast<char *>(bitvectors[i].data()), static_cast<std::streamsize>(bitvector_bytes));
 
-            poppys[i].build(bitvectors[i], num_bits);
+            poppys[i].build(bitvectors[i], num_bits + bitvector_pad_u64s*u64_bits);
 
             c_map[i + 1] = poppys[i].total_1s;
         }

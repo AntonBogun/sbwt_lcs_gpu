@@ -68,6 +68,8 @@ class PoppySmall {
 public:
     V_type_layer layer_1_2;
     u32 total_1s = static_cast<u32>(-1);
+    template <typename... Args>
+    PoppySmall(Args&&... args) : layer_1_2(std::forward<Args>(args)...) {}
 
     void build(const V_type_in &bits_vector, u32 num_bits) {
         u64 layer_1_count = 0;
@@ -104,5 +106,15 @@ public:
         return total;
     }
 };
+
+//! does not pad automatically
+inline u64 poppysmall_from_bitvector_u64s(u64 num_u64s){
+    // return ceil_div(num_u64s*u64_bits, superblock_bits)+1;//pad in case of accessing (size)th rank (0-indexed)
+    return ceil_div(num_u64s*u64_bits, superblock_bits);
+}
+constexpr u64 poppysmall_from_bitvector_u64s_const(u64 num_u64s){
+    // return ceil_div(num_u64s*u64_bits, superblock_bits)+1;//pad in case of accessing (size)th rank (0-indexed)
+    return ceil_div_const(num_u64s*u64_bits, superblock_bits);
+}
 
 } // namespace sbwt_lcs_gpu

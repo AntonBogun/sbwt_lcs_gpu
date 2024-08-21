@@ -83,6 +83,37 @@ include(cmake/CCache.cmake)
 find_package(Threads REQUIRED)
 find_package(OpenMP REQUIRED)
 
+# if(OpenMP_CXX_FOUND)
+#     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+#     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+#     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
+# endif()
+
+# set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+
+# message(STATUS "OpenMP_FOUND: ${OpenMP_FOUND}")
+# message(STATUS "OpenMP_VERSION: ${OpenMP_VERSION}")
+
+# message(STATUS "OpenMP_CXX_FOUND: ${OpenMP_CXX_FOUND}")
+# message(STATUS "OpenMP_CXX_FLAGS: ${OpenMP_CXX_FLAGS}")
+# message(STATUS "OpenMP_CXX_LIBRARIES: ${OpenMP_CXX_LIBRARIES}")
+# message(STATUS "OpenMP_CXX_INCLUDE_DIRS: ${OpenMP_CXX_INCLUDE_DIRS}")
+
+# message(STATUS "OpenMP_C_FOUND: ${OpenMP_C_FOUND}")
+# message(STATUS "OpenMP_C_FLAGS: ${OpenMP_C_FLAGS}")
+# message(STATUS "OpenMP_C_LIBRARIES: ${OpenMP_C_LIBRARIES}")
+# message(STATUS "OpenMP_C_INCLUDE_DIRS: ${OpenMP_C_INCLUDE_DIRS}")
+
+# message(STATUS "OpenMP_omp_LIBRARY: ${OpenMP_omp_LIBRARY}")
+# message(STATUS "OpenMP_gomp_LIBRARY: ${OpenMP_gomp_LIBRARY}")
+# message(STATUS "OpenMP_pthread_LIBRARY: ${OpenMP_pthread_LIBRARY}")
+
+# if(TARGET OpenMP::OpenMP_CXX)
+#     get_target_property(OMP_INTERFACE_LIBRARIES OpenMP::OpenMP_CXX INTERFACE_LINK_LIBRARIES)
+#     message(STATUS "OpenMP::OpenMP_CXX INTERFACE_LINK_LIBRARIES: ${OMP_INTERFACE_LIBRARIES}")
+# endif()
+
+
 
 # git submodule add https://github.com/iosfwd/sdsl-lite.git sdsl-lite
 ## Add local dependencies as targets
@@ -92,16 +123,6 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/sdsl-lite
 # add_subdirectory(${PROJECT_SOURCE_DIR}/KMC
 #   ${PROJECT_BINARY_DIR}/external/KMC/build)
 
-# Our sources, excluding the file with the main function
-set(SBWT_SOURCES
-  # src/globals.cpp
-  # src/suffix_group_optimization.cpp
-  # src/EM_sort/Block.cpp
-  # src/EM_sort/EM_sort.cpp
-  # src/SeqIO.cpp src/run_kmc.cpp
-  # src/kmc_construct_helper_classes.cpp
-  # main.cpp
-  )
 
 add_executable(sbwt_lcs_gpu
   # src/CLI/sbwt.cpp
@@ -114,7 +135,7 @@ add_executable(sbwt_lcs_gpu
   src/gpu_utils.cu
   src/sanity_test_cpu.cpp
   src/sanity_test_gpu.cu
-  ${SBWT_SOURCES})
+  )
 set_target_properties(sbwt_lcs_gpu PROPERTIES CUDA_SEPARABLE_COMPILATION ON CUDA_ARCHITECTURES 80)
 
 target_include_directories(sbwt_lcs_gpu PRIVATE
@@ -133,6 +154,7 @@ target_link_libraries(sbwt_lcs_gpu PRIVATE
   Threads::Threads
   ${CXX_FILESYSTEM_LIBRARIES}
   OpenMP::OpenMP_CXX
+  # -lgomp
   # kmc_tools
   # kmc_core)
   )
