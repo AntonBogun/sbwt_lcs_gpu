@@ -88,7 +88,8 @@ const u64 gpu_batch_mult = 16;
 //these are gpu_mult sized batches
 const u64 batches_in_gpu_stream = 8;
 //these are divided by gpu_mult sized compared to gpu batches
-const u64 batches_in_out_buf_stream = 32;
+//how many batches are in the output buffer
+const u64 batches_in_out_buf_stream = 20;
 const u64 gpu_readers = 4;
 constexpr double out_compression_ratio = 1.8;
 extern u64 num_physical_streams;
@@ -164,6 +165,7 @@ class FCVector { // Fixed Capacity Vector
 
     // inline T &operator[](i64 index) {
     //     if (index >= count_ || index < 0) {
+    //}
     inline T &operator[](u64 index) {
         if (index >= count_) {//automatically checks if index is negative
             throw std::out_of_range("FCV Index [] out of range: "+std::to_string(index)+" >= "+std::to_string(count_));

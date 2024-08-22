@@ -64,7 +64,9 @@ struct MemoryPositions {
 class FileReadStream: public CB_data<FileReadStream>{
     public:
     i64 current_file=0;
+    static const u64 logic_batch_size = batch_buf_u64s*sizeof(u64);
     FILE* file=nullptr;
+    //no logic_batch_size here since v_r is not used
     FileReadStream(i64 _size, i32 _max_writers, i32 _max_readers): 
         CB_data(_size, _max_writers, _max_readers) {}
     // std::string dump_impl(){
@@ -111,10 +113,12 @@ class FileReadMS: public SharedThreadMultistream<FileReadMS,FileReadStream>{
         return current_index<files.size();
     }
     bool no_write_can_read_impl(i32 stream_indx){
-        return data[stream_indx].v_r>0;
+        auto& R = data[stream_indx];
+        return R.current_file<files[R.id].filenames.size();
     }
     bool no_write_ended_impl(i32 stream_indx, i64 buf_S, i64 r_size){
-        return data[stream_indx].v_r<=0;
+        auto& R = data[stream_indx];
+        return R.current_file>=files[R.id].filenames.size();
     }
     i64 get_write_id_impl(i32 stream_indx){
         // return data[stream_indx].id+10;
@@ -127,6 +131,8 @@ class FileBufStream: public CB_data<FileBufStream>{
     public:
     static const u64 batch_u64s = batch_buf_u64s;
     static const u64 u64s=batches_in_stream*batch_u64s;
+    static const u64 logic_batch_size = batch_buf_u64s*sizeof(u64);
+    static const u64 logic_size = batches_in_stream*logic_batch_size;
     OffsetVector<char> stream_data;
     std::vector<BatchFileBufInfo> batch_info;
     bool ended=false;
@@ -155,7 +161,7 @@ class FileBufMS: public SharedThreadMultistream<FileBufMS,FileBufStream>{
         OffsetVector<char> temp(section_data, data.size()*FileBufStream::u64s, FileBufStream::u64s);
         // data.back().stream_data.resize(FileBufStream::u64s*sizeof(u64));
         temp.resize(FileBufStream::u64s*sizeof(u64));
-        data.emplace_back(FileBufStream::u64s*sizeof(u64), 1, 1, std::move(temp));
+        data.emplace_back(FileBufStream::logic_size, 1, 1, std::move(temp));
     }
     void allocate_impl(i32 stream_indx, i64 id){
         data[stream_indx].ended=false;
@@ -165,6 +171,11 @@ class FileBufMS: public SharedThreadMultistream<FileBufMS,FileBufStream>{
     bool sequential_ended_impl(i32 stream_indx,i64 buf_S, i64 r_size){return data[stream_indx].ended;}
     bool get_is_last_child_impl(i32 stream_indx, i64 buf_E, bool is_last_parent){return is_last_parent;}
     bool get_is_first_parent_impl(i32 stream_indx, bool is_begin){return is_begin;}
+};
+enum ParseState {
+    WAIT,
+    SKIP,
+    READ
 };
 class ParseStream: public CB_data<ParseStream>{
     public:
@@ -182,15 +193,18 @@ class ParseStream: public CB_data<ParseStream>{
 
     static const u64 batch_u64s = chars_batch_u64s + seps_batch_u64s + seps_bitvector_batch_u64s + seps_rank_batch_u64s;
     static const u64 u64s = batch_u64s * batches_in_stream;
+    static const u64 logic_batch_size = chars_batch_u64s;
+    static const u64 logic_size = batches_in_stream*logic_batch_size;
     OffsetVector<u64> stream_data;
     std::vector<BatchFileInfo> batch_info;
     FCVector<ParseVectorBatch> batches;
+    ParseState parse_state = WAIT;
     ParseStream(i64 _size, i32 _max_writers, i32 _max_readers, OffsetVector<u64>&& _data):
         CB_data(_size, _max_writers, _max_readers),
         stream_data(std::move(_data)), batch_info(batches_in_stream), batches(batches_in_stream) {
             for(i32 i=0;i<batches_in_stream;i++){
                 batches.emplace_back(ParseVectorBatch{
-                    OffsetVector<char>(stream_data, i*batch_u64s+chars_batch_start, chars_batch_u64s),
+                    OffsetVector<u64>(stream_data, i*batch_u64s+chars_batch_start, chars_batch_u64s),
                     OffsetVector<u64>(stream_data,  i*batch_u64s+seps_batch_start, seps_batch_u64s),
                     OffsetVector<u64>(stream_data,  i*batch_u64s+seps_bitvector_batch_start, seps_bitvector_batch_u64s),
                     OffsetVector<u64>(stream_data,  i*batch_u64s+seps_rank_batch_start, seps_rank_batch_u64s)
@@ -218,7 +232,7 @@ class ParseMS: public SharedThreadMultistream<ParseMS,ParseStream>{
         OffsetVector<u64> temp(section_data, data.size()*ParseStream::u64s, ParseStream::u64s);
         // data.back().stream_data.resize(ParseStream::u64s);
         temp.resize(ParseStream::u64s);
-        data.emplace_back(ParseStream::u64s, 1, 1, //no reason to use more than 1 reader?
+        data.emplace_back(ParseStream::logic_size, 1, 1, //no reason to use more than 1 reader?
         std::move(temp));
     }
     void allocate_impl(i32 stream_indx, i64 id){
@@ -251,6 +265,10 @@ class MultiplexStream: public CB_data<MultiplexStream>{
     static const u64 batch_section_u64s = chars_batch_section_u64s + seps_batch_section_u64s + seps_bitvector_batch_section_u64s + seps_rank_batch_section_u64s + thread_lookup_vector_u64s;
     static const u64 u64s = batch_section_u64s * batches_in_gpu_stream; //~for now do not scale batches with number of streams
 
+    static const u64 logic_batch_size = 1;
+    static const u64 logic_gpu_batch_size = gpu_batch_mult*logic_batch_size;
+    static const u64 logic_size = batches_in_gpu_stream*logic_gpu_batch_size;
+
     OffsetVector<u64> stream_data;
     GpuPointer<u64> stream_gpu_data;
     std::vector<BatchFileInfo> batch_info;
@@ -277,7 +295,7 @@ MultiplexStream::MultiplexStream(i64 _size, i32 _max_writers, i32 _max_readers, 
             for(i32 i=0;i<batches_in_gpu_stream;i++){
                 for(i32 j=0;j<gpu_batch_mult;j++){
                     batches.emplace_back(ParseVectorBatch{
-                        OffsetVector<char>(stream_data, i*batch_section_u64s+chars_batch_section_start+
+                        OffsetVector<u64>(stream_data, i*batch_section_u64s+chars_batch_section_start+
                         j*chars_batch_section_u64s/gpu_batch_mult, chars_batch_section_u64s/gpu_batch_mult),
                         OffsetVector<u64>(stream_data,  i*batch_section_u64s+seps_batch_section_start+
                         j*seps_batch_section_u64s/gpu_batch_mult, seps_batch_section_u64s/gpu_batch_mult),
@@ -318,7 +336,7 @@ class MultiplexMS: public SharedThreadMultistream<MultiplexMS,MultiplexStream>{
         OffsetVector<u64> temp(section_data, data.size()*MultiplexStream::u64s, MultiplexStream::u64s);
         // data.back().stream_data.resize(MultiplexStream::u64s);
         temp.resize(MultiplexStream::u64s);
-        data.emplace_back(gpu_batch_mult*batches_in_gpu_stream, num_physical_streams, gpu_readers,
+        data.emplace_back(MultiplexStream::logic_size, num_physical_streams, gpu_readers,
         std::move(temp), GpuPointer<u64>(gpu_data, 0, GPUSection::in_u64s));
     }
     void allocate_impl(i32 stream_indx, i64 id){
@@ -336,6 +354,10 @@ class DemultiplexStream: public CB_data<DemultiplexStream>{
     public:
     static const u64 indexes_batch_u64s = GPUSection::out_batch_u64s;
     static const u64 u64s = indexes_batch_u64s * batches_in_gpu_stream; //~for now do not scale batches with number of streams
+    static const u64 logic_batch_size = MultiplexStream::logic_batch_size;
+    static const u64 logic_gpu_batch_size = MultiplexStream::logic_gpu_batch_size;
+    static const u64 logic_size = MultiplexStream::logic_size;
+
     OffsetVector<u64> stream_data;
     GpuPointer<u64> stream_gpu_data;
     std::vector<BatchFileInfo> batch_info;
@@ -368,7 +390,7 @@ class DemultiplexMS: public SharedThreadMultistream<DemultiplexMS,DemultiplexStr
         OffsetVector<u64> temp(section_data, data.size()*DemultiplexStream::u64s, DemultiplexStream::u64s);
         // data.back().stream_data.resize(DemultiplexStream::u64s);
         temp.resize(DemultiplexStream::u64s);
-        data.emplace_back(gpu_batch_mult*batches_in_gpu_stream, gpu_readers, num_physical_streams,
+        data.emplace_back(DemultiplexStream::logic_size, gpu_readers, num_physical_streams,
         std::move(temp), GpuPointer<u64>(gpu_data, 0, GPUSection::out_u64s));
     }
     void allocate_impl(i32 stream_indx, i64 id){
@@ -390,8 +412,10 @@ class DemultiplexMS: public SharedThreadMultistream<DemultiplexMS,DemultiplexStr
 //!probably have to add queue and a mutex for the queue
 class WriteBufStream: public CB_data<WriteBufStream>{
     public:
-    static const u64 batch_u64s = ceil_double_div_const(ceil_div_const(DemultiplexStream::indexes_batch_u64s,batches_in_gpu_stream*gpu_batch_mult), out_compression_ratio);
+    static const u64 batch_u64s = ceil_double_div_const(ceil_div_const(DemultiplexStream::indexes_batch_u64s,gpu_batch_mult), out_compression_ratio);
     static const u64 u64s=batches_in_out_buf_stream*batch_u64s;
+    static const u64 logic_batch_size = batch_u64s*sizeof(u64);
+    static const u64 logic_size = batches_in_out_buf_stream*logic_batch_size;
     OffsetVector<u8> stream_data;
     std::vector<BatchFileBufInfo> batch_info;
     bool ended=false;
@@ -415,7 +439,7 @@ class WriteBufMS: public SharedThreadMultistream<WriteBufMS,WriteBufStream>{
         OffsetVector<u8> temp(section_data, data.size()*WriteBufStream::u64s, WriteBufStream::u64s);
         // data.back().stream_data.resize(WriteBufStream::u64s*sizeof(u64));
         temp.resize(WriteBufStream::u64s*sizeof(u64));
-        data.emplace_back(WriteBufStream::u64s*sizeof(u64), 1, 1, std::move(temp));
+        data.emplace_back(WriteBufStream::logic_size, 1, 1, std::move(temp));
     }
     void allocate_impl(i32 stream_indx, i64 id){
         data[stream_indx].ended=false;
@@ -431,6 +455,7 @@ class WriteBufMS: public SharedThreadMultistream<WriteBufMS,WriteBufStream>{
 class FileOutStream: public CB_data<FileOutStream>{
     public:
     i64 current_file=0;
+    static const u64 logic_batch_size = WriteBufStream::logic_batch_size;
     FILE* file=nullptr;
     FileOutStream(i64 _size, i32 _max_writers, i32 _max_readers): 
         CB_data(_size, _max_writers, _max_readers) {}
@@ -481,12 +506,92 @@ void update_sections(){
 class FileReadWorker: public MS_Worker<FileReadWorker,FileReadMS,FileBufMS>{
     public:
     FileReadWorker(FileReadMS& _MS_r, FileBufMS& _MS_w):
-        MS_Worker(_MS_r, _MS_w,FileBufStream::batch_u64s*sizeof(u64),FileBufStream::batch_u64s*sizeof(u64)) {}
+        MS_Worker(_MS_r, _MS_w,FileReadStream::logic_batch_size,FileBufStream::logic_batch_size) {}
     std::pair<i64,i64> do_work(
         i32 read_indx, i32 write_indx, i64 r_size, i64 buf_read, i64 buf_write,
         i64 read_step, i64 write_step,  bool is_first_child, bool is_last_parent){
-        
+        auto& R = MS_r.data[read_indx];
+        auto& W = MS_w.data[write_indx];
+        i64 total_read = 0;
+        i64 batch_index = buf_write / FileBufStream::logic_batch_size;
+        //valid because always read batch size, or at the end read until end of file(s)
+        if(buf_write%FileBufStream::logic_batch_size!=0){
+            PRINT_MPDBG("FileReadWorker::do_work: buf_write not aligned to batch size: "<<buf_write);
+            throw std::runtime_error("FileReadWorker::do_work: buf_write not aligned to batch size");
+        }
+        BatchFileBufInfo& batch_info = W.batch_info[batch_index];
+        batch_info.reset();
+        while (total_read < r_size && R.current_file < MS_r.files[R.id].filenames.size()) {
+            if (R.file == nullptr) {
+                R.file = fopen(MS_r.files[R.id].filenames[R.current_file].c_str(), "rb");
+                if (R.file == nullptr) {
+                    PRINT_MPDBG("FileReadWorker::do_work: could not open file " << MS_r.files[R.id].filenames[R.current_file]);
+                    R.current_file++;
+                    continue;
+                }
+            }
+
+            i64 remaining = r_size - total_read;
+            i64 file_remaining = MS_r.files[R.id].lengths[R.current_file] - ftell(R.file);
+            i64 to_read = std::min(remaining, file_remaining);
+            if (to_read==0){
+                PRINT_MPDBG("FileReadWorker::do_work: to_read==0, id: "<<R.id<<", current_file: "<<R.current_file);
+                throw std::runtime_error("FileReadWorker::do_work: to_read==0");
+            }
+
+            i64 actually_read = fread(W.stream_data.data() + buf_write + total_read, 1, to_read, R.file);
+            if (actually_read!=to_read) {
+                PRINT_MPDBG("FileReadWorker::do_work: actually_read!=to_read: "<<actually_read<<"!="<<to_read<<", id: "<<R.id<<", current_file: "<<R.current_file);
+                throw std::runtime_error("FileReadWorker::do_work: actually_read!=to_read");
+            }
+            batch_info.intervals.push_back({total_read, total_read + actually_read});
+            batch_info.fileIds.push_back(R.current_file);
+            total_read += actually_read;
+
+            if (ftell(R.file) == MS_r.files[R.id].lengths[R.current_file]) {
+                fclose(R.file);
+                R.file = nullptr;
+                R.current_file++;
+                if (R.current_file == MS_r.files[R.id].filenames.size()) {
+                    batch_info.is_last = true;
+                    break;
+                }
+            }
+        }
+        return {total_read, total_read};
     }
 };
 
+class FileBufWorker: public MS_Worker<FileBufWorker,FileBufMS,ParseMS>{
+    public:
+    FileBufWorker(FileBufMS& _MS_r, ParseMS& _MS_w):
+        MS_Worker(_MS_r, _MS_w,ParseStream::batch_u64s*sizeof(u64),ParseStream::batch_u64s*sizeof(u64)) {}
+    std::pair<i64,i64> do_work(
+        i32 read_indx, i32 write_indx, i64 r_size, i64 buf_read, i64 buf_write,
+        i64 read_step, i64 write_step,  bool is_first_child, bool is_last_parent){
+        auto& R = MS_r.data[read_indx];
+        auto& W = MS_w.data[write_indx];
+        i64 total_read = 0;
+        //no guarantee that the buffer is aligned to the batch size
+        i64 read_batch_index = buf_read / (FileBufStream::batch_u64s * sizeof(u64));//in chars
+        i64 next_read_batch_index = (read_batch_index + 1) % R.batch_info.size();
+        i64 write_batch_index = buf_write / ParseStream::chars_batch_u64s;//in u64s, use chars_batch_u64s for alignment
+        //align writing to batch size, avoids extra logic
+        // i64 next_write_batch_index = (write_batch_index + 1) % R.batch_info.size();
+
+        BatchFileBufInfo& read_batch_info = R.batch_info[read_batch_index];
+        BatchFileInfo& write_batch_info = W.batch_info[write_batch_index];
+        ParseVectorBatch& write_batch = W.batches[write_batch_index];
+        i64 offset = buf_write % ParseStream::chars_batch_u64s;
+        u64 curr_u64 = write_batch.chars[offset];
+
+        //if aligned, clear write
+        if (offset == 0) {
+            write_batch_info.reset();
+            write_batch.reset();
+            curr_u64 = 0;
+        }
+        //parse the FASTQ/FASTA etc file in the read buffer
+        ParseState state = W.parse_state;
+        while ()
 }//namespace sbwt_lcs_gpu

@@ -18,9 +18,10 @@ struct InvalidCharsInterval{
 struct BatchFileBufInfo{
     std::vector<FileInterval> intervals;
     std::vector<i64> fileIds;
-    void clear(){
+    void reset(){
         intervals.clear();
         fileIds.clear();
+        is_last = false;
     }
     bool is_last;
 };
@@ -31,17 +32,28 @@ struct BatchFileInfo{
     i64 id;
     bool is_first;
     bool is_last;
-    void clear(){
+    void reset(){
         intervals.clear();
         fileIds.clear();
         // invalid_intervals.clear();
+        is_first = false;
+        is_last = false;
+        id = -1;
     }
 };
 struct ParseVectorBatch{
-    OffsetVector<char> chars;
+    OffsetVector<u64> chars;
     OffsetVector<u64> seps;
     OffsetVector<u64> bits;
     OffsetVector<u64> rank;
+    i64 num_packed_chars=0;
+    void reset(){
+        num_packed_chars = 0;
+        chars.clear();
+        seps.clear();
+        bits.clear();
+        rank.clear();
+    }
 };
 struct GPUThreadLookupTableEntry{
     i32 substract;//threadid-substract = threadid in local batch, also used by threads to look through 
