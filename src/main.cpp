@@ -21,11 +21,13 @@ namespace sbwt_lcs_gpu {
     u64 FileBufMS::u64s = 0;
     u64 ParseMS::u64s = 0;
     u64 WriteBufMS::u64s = 0;
+    u64 DebugWriteBufMS::u64s = 0;
 
     u64 ParseMS::data_offset = 0;
     u64 MultiplexMS::data_offset = 0;
     u64 DemultiplexMS::data_offset = 0;
     u64 WriteBufMS::data_offset = 0;
+    u64 DebugWriteBufMS::data_offset = 0;
     u64 MemoryPositions::total = 0;
     // u64 MemoryPositions::gpu = 0;
     i32 FileReadMS::num_threads = 0;
@@ -34,6 +36,7 @@ namespace sbwt_lcs_gpu {
     i32 MultiplexMS::num_threads = 0; 
     i32 DemultiplexMS::num_threads = 0;
     i32 WriteBufMS::num_threads = 0;
+    i32 DebugWriteBufMS::num_threads = 0;
     i32 total_threads = 0;
     i32 k=0;
 }//namespace sbwt_lcs_gpu
@@ -92,38 +95,46 @@ std::string formatAllSections() {
         {"offset",ParseMS::data_offset}
     });
 
-    // MultiplexSection
-    oss << formatSection("MultiplexSection", {
-        {"chars_batch_section_u64s", MultiplexStream::chars_batch_section_u64s},
-        {"seps_batch_section_u64s", MultiplexStream::seps_batch_section_u64s},
-        {"seps_bitvector_batch_section_u64s", MultiplexStream::seps_bitvector_batch_section_u64s},
-        {"seps_rank_batch_section_u64s", MultiplexStream::seps_rank_batch_section_u64s},
-        {"thread_lookup_vector_u64s", MultiplexStream::thread_lookup_vector_u64s},
-        {"batch_section_u64s", MultiplexStream::batch_section_u64s},
-        {"stream_u64s", MultiplexStream::u64s},
-        {"u64s", MultiplexMS::u64s},
-        {"offset",MultiplexMS::data_offset}
-    });
+    //!debug
+    // // MultiplexSection
+    // oss << formatSection("MultiplexSection", {
+    //     {"chars_batch_section_u64s", MultiplexStream::chars_batch_section_u64s},
+    //     {"seps_batch_section_u64s", MultiplexStream::seps_batch_section_u64s},
+    //     {"seps_bitvector_batch_section_u64s", MultiplexStream::seps_bitvector_batch_section_u64s},
+    //     {"seps_rank_batch_section_u64s", MultiplexStream::seps_rank_batch_section_u64s},
+    //     {"thread_lookup_vector_u64s", MultiplexStream::thread_lookup_vector_u64s},
+    //     {"batch_section_u64s", MultiplexStream::batch_section_u64s},
+    //     {"stream_u64s", MultiplexStream::u64s},
+    //     {"u64s", MultiplexMS::u64s},
+    //     {"offset",MultiplexMS::data_offset}
+    // });
 
-    // GPUSection
-    oss << formatSection("GPUSection", {
-        {"in_batch_u64s", GPUSection::in_batch_u64s},
-        {"out_batch_u64s", GPUSection::out_batch_u64s},
-        {"in_u64s", GPUSection::in_u64s},
-        {"out_u64s", GPUSection::out_u64s},
-        {"u64s", GPUSection::u64s}
-    });
+    // // GPUSection
+    // oss << formatSection("GPUSection", {
+    //     {"in_batch_u64s", GPUSection::in_batch_u64s},
+    //     {"out_batch_u64s", GPUSection::out_batch_u64s},
+    //     {"in_u64s", GPUSection::in_u64s},
+    //     {"out_u64s", GPUSection::out_u64s},
+    //     {"u64s", GPUSection::u64s}
+    // });
 
-    // DemultiplexSection
-    oss << formatSection("DemultiplexSection", {
-        {"indexes_batch_u64s", DemultiplexStream::indexes_batch_u64s},
-        {"stream_u64s", DemultiplexStream::u64s},
-        {"u64s", DemultiplexMS::u64s},
-        {"offset",DemultiplexMS::data_offset}
-    });
+    // // DemultiplexSection
+    // oss << formatSection("DemultiplexSection", {
+    //     {"indexes_batch_u64s", DemultiplexStream::indexes_batch_u64s},
+    //     {"stream_u64s", DemultiplexStream::u64s},
+    //     {"u64s", DemultiplexMS::u64s},
+    //     {"offset",DemultiplexMS::data_offset}
+    // });
 
-    // WriteBufSection
-    oss << formatSection("WriteBufSection", {
+    // // WriteBufSection
+    // oss << formatSection("WriteBufSection", {
+    //     {"batch_u64s", WriteBufStream::batch_u64s},
+    //     {"stream_u64s", WriteBufStream::u64s},
+    //     {"u64s", WriteBufMS::u64s},
+    //     {"offset",WriteBufMS::data_offset}
+    // });
+    
+    oss << formatSection("DebugWriteBufSection", {
         {"batch_u64s", WriteBufStream::batch_u64s},
         {"stream_u64s", WriteBufStream::u64s},
         {"u64s", WriteBufMS::u64s},

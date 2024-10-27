@@ -580,12 +580,15 @@ void update_sections(){
     // GPUSection::u64s = GPUSection::in_u64s + GPUSection::out_u64s;
     // DemultiplexSection::u64s = DemultiplexSection::indexes_batch_u64s * num_physical_streams;
     WriteBufMS::u64s = WriteBufStream::u64s * num_physical_streams;
+    DebugWriteBufMS::u64s = DebugWriteBufStream::u64s * num_physical_streams;//!debug
 
     ParseMS::data_offset = FileBufMS::data_offset + FileBufMS::u64s;
     MultiplexMS::data_offset = ParseMS::data_offset + ParseMS::u64s;
     DemultiplexMS::data_offset = MultiplexMS::data_offset + MultiplexMS::u64s;
     WriteBufMS::data_offset = DemultiplexMS::data_offset + DemultiplexMS::u64s;
-    MemoryPositions::total = WriteBufMS::data_offset + WriteBufMS::u64s;
+    DebugWriteBufMS::data_offset = ParseMS::data_offset + ParseMS::u64s;//!debug
+    // MemoryPositions::total = WriteBufMS::data_offset + WriteBufMS::u64s;//!debug
+    MemoryPositions::total = DebugWriteBufMS::data_offset + DebugWriteBufMS::u64s;//!debug
 
     FileReadMS::num_threads = num_physical_streams;
     FileBufMS::num_threads = num_physical_streams;
@@ -593,7 +596,9 @@ void update_sections(){
     MultiplexMS::num_threads = 4;
     DemultiplexMS::num_threads = num_physical_streams;
     WriteBufMS::num_threads = num_physical_streams;
-    total_threads = FileReadMS::num_threads + FileBufMS::num_threads + ParseMS::num_threads + MultiplexMS::num_threads + DemultiplexMS::num_threads + WriteBufMS::num_threads;
+    DebugWriteBufMS::num_threads = num_physical_streams;
+    // total_threads = FileReadMS::num_threads + FileBufMS::num_threads + ParseMS::num_threads + MultiplexMS::num_threads + DemultiplexMS::num_threads + WriteBufMS::num_threads;
+    total_threads = FileReadMS::num_threads + FileBufMS::num_threads + ParseMS::num_threads + DebugWriteBufMS::num_threads;
 }
 
 
