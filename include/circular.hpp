@@ -519,8 +519,9 @@ class MS_Worker {//MultiStream_Worker
     const i64 size_max_write;//must be positive
     //!DEBUG
     std::string debug_str="";
-    
-    void run(){
+    //bool matters only in single_thread mode, true means true exit, false means condition variable exit
+    template<bool single_thread>
+    bool _run(){
         //!debug profile//
         // std::thread::id thread_id=std::this_thread::get_id();
         // i32 thread_indx=-1;
@@ -549,7 +550,7 @@ class MS_Worker {//MultiStream_Worker
             {
                 std::unique_lock<std::mutex> lock(MS_r.m);
                 //WAIT_CONDITION
-                MS_r.cv_S0.wait(lock, [
+                auto cond=[
                     // this,&indx,&res,&was_begin,&thread_id,&thread_indx
                     this,&indx,&res,&was_begin
                 ](){//wait for exit or allocation or read availability
@@ -648,7 +649,15 @@ class MS_Worker {//MultiStream_Worker
                     //     debug_object->add_string(ss.str(),thread_id,thread_indx);
                     // }
                     return false;
-                });
+                };
+                if constexpr(single_thread){
+                    if(cond()){
+                        lock.unlock();
+                        return false;
+                    }
+                }else{
+                    MS_r.cv_S0.wait(lock, cond);
+                }
 
 
                 if(res==EXIT){
@@ -1278,7 +1287,14 @@ class MS_Worker {//MultiStream_Worker
                 }
             }
         }
+        return true;
         // syncprint(debug_str<< "::run end");
+    }
+    void run(){
+        _run<false>();//multithreaded
+    }
+    bool run_single(){
+        return _run<true>();//single threaded
     }
     MS_Worker(read_ms_impl& _MS_r, write_ms_impl& _MS_w, i64 _size_max_read, i64 _size_max_write):
         MS_r(_MS_r), MS_w(_MS_w), size_max_read(_size_max_read), size_max_write(_size_max_write){}

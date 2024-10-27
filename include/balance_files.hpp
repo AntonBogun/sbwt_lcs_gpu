@@ -2,7 +2,7 @@
 #include "utils.h"
 #include "structs.hpp"
 #include <algorithm>
-#include <filesystem>
+
 // #include <queue>
 // #include <stdexcept>
 // #include <utility>
@@ -299,7 +299,7 @@ auto make_index_sorter(i64 n,Args&&... args) {
 
 // inline void balance_files(std::vector<std::string> &in_files_, std::vector<std::string> &out_files_, u64 partitions) {
 // std::vector<std::vector<std::tuple<std::string,std::string,i64>>> balance_files(std::vector<std::string> &in_files_, std::vector<std::string> &out_files_) {
-std::vector<StreamFilenamesContainer> balance_files(std::vector<std::string> &in_files_, std::vector<std::string> &out_files_) {
+std::vector<StreamFilenamesContainer> balance_files(std::vector<std::string> &in_files_,std::vector<i64>& sizes, std::vector<std::string> &out_files_) {
     if (in_files_.size() != out_files_.size()) {
         throw std::runtime_error("Input and output file sizes differ");
     }
@@ -337,11 +337,11 @@ std::vector<StreamFilenamesContainer> balance_files(std::vector<std::string> &in
     //     }
     // }
     
-    std::vector<i64> sizes;
+    // std::vector<i64> sizes;
     using sort_value_type = DualVectorISV<IndexSorterMethod::BySort, std::vector<std::string>, std::vector<std::string>, std::vector<i64>>;
-    for (i64 i = 0; i < in_files_.size(); ++i) {
-        sizes.push_back(((i64)std::filesystem::file_size(in_files_[i])));//sort from smallest to largest
-    }
+    // for (i64 i = 0; i < in_files_.size(); ++i) {
+    //     sizes.push_back((std::filesystem::file_size(in_files_[i])));//sort from smallest to largest
+    // }
     auto sorter = make_index_sorter<sort_value_type>(in_files_.size(), in_files_, out_files_, sizes);
     quickSort(sorter.first, sorter.second);
     // std::vector<std::vector<std::tuple<std::string,std::string,i64>>> result;

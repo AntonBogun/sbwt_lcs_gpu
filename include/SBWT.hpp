@@ -74,7 +74,7 @@ class SBWTContainerCPU : public SBWTContainer {
         in_stream.seekg(static_cast<std::ios::off_type>(-sizeof(u64)), std::ios::cur);
         const u64 vectors_start_position = in_stream.tellg();
 
-
+        //$ segment is 1 size
         for (i32 i = 0; i < cmap_size; i++) c_map.emplace_back(1);
         kmer_size = read_k(in_stream);
         in_stream.close();

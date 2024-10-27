@@ -1,1 +1,4 @@
+./build/bin/sbwt_lcs_gpu -h
 ./build/bin/sbwt_lcs_gpu -sbwt ./data/index.tdbg
+./build/bin/sbwt_lcs_gpu -gpu 0 -sbwt ./data/index.tdbg
+./build/bin/sbwt_lcs_gpu -gpu 0 -sbwt ./data/index.tdbg 

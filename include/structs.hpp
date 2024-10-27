@@ -8,8 +8,24 @@ struct StreamFilenamesContainer{
     i64 total_length;
 };
 struct FileInterval{
-    i64 start;
-    i64 end;
+    i64 start;//in terms of chars
+    i64 end;//exclusive
+    i64 file_id;
+    FileInterval(i64 _start, i64 _end, i64 _file_id):start(_start),end(_end),file_id(_file_id){}
+    //end-start
+    inline i64 length() const{
+        return end-start;
+    }
+};
+struct FileSepInterval{
+    i64 start;//index in terms of seps
+    i64 end;//exclusive
+    i64 file_id;
+    FileSepInterval(i64 _start, i64 _end, i64 _file_id):start(_start),end(_end),file_id(_file_id){}
+    //end-start
+    inline i64 length() const{
+        return end-start;
+    }
 };
 struct InvalidCharsInterval{
     i64 start;
@@ -17,24 +33,24 @@ struct InvalidCharsInterval{
 };
 struct BatchFileBufInfo{
     std::vector<FileInterval> intervals;
-    std::vector<i64> fileIds;
+    // std::vector<i64> fileIds;
     void reset(){
         intervals.clear();
-        fileIds.clear();
+        // fileIds.clear();
         is_last = false;
     }
     bool is_last;
 };
 struct BatchFileInfo{
-    std::vector<FileInterval> intervals;
-    std::vector<i64> fileIds;
+    std::vector<FileSepInterval> intervals;
+    // std::vector<i64> fileIds;
     // std::vector<InvalidCharsInterval> invalid_intervals;
-    i64 id;
+    i64 id; //used to determine which stream this belongs to (when demultiplexing)
     bool is_first;
     bool is_last;
     void reset(){
         intervals.clear();
-        fileIds.clear();
+        // fileIds.clear();
         // invalid_intervals.clear();
         is_first = false;
         is_last = false;

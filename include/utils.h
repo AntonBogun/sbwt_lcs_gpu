@@ -12,6 +12,7 @@
 #include <cmath>
 #include <type_traits>
 #include <cstdio>
+#include <filesystem>
 
 namespace sbwt_lcs_gpu {
 using std::min;
@@ -53,18 +54,163 @@ constexpr i64 ceil_double_div_const(double a, double b) {
 
 
 
+
+
 static_assert(sizeof(std::pair<i32, i32>)==2*sizeof(i32), "std::pair<i32, i32> is not packed");
 static_assert(sizeof(std::pair<i32, i32>)==2*sizeof(i32), "std::pair<i32, i32> is not packed");
 
 
 const u64 u64_bits = 64;
 const u64 bits_in_byte = 8;
+const u64 full_u64_mask = ~(0ULL);
 
-enum class alphabet { A = 0, C = 1, G = 2, T = 3 };
+enum class Alphabet { A = 0, C = 1, G = 2, T = 3 };
+//size of the offset map, index i contains end offset of group i, 0=$, 1=A, 2=C, 3=G, 4=T
 const u64 cmap_size = 5;
+//ACGT Alphabet size
 const u64 alphabet_size = 4;
+//bits in a ACGT char (2)
 const u64 bits_per_char = 2;
+//mask of bits_per_char bits
+const u64 alphabet_char_mask = (1<<bits_per_char)-1;
+//number of ACGT chars that fit in u64 (64/2=32)
 const u64 chars_per_u64 = u64_bits / bits_per_char;//32, //!code does not deal with u64_bits%bits_per_char!=0
+//switch statement to convert char to Alphabet
+inline Alphabet char_to_alphabet(char c) {
+    switch (c) {
+    case 'A':
+        return Alphabet::A;
+    case 'C':
+        return Alphabet::C;
+    case 'G':
+        return Alphabet::G;
+    case 'T':
+        return Alphabet::T;
+    default:
+        return Alphabet::A;
+    }
+};
+inline char alphabet_to_char(Alphabet a) {
+    switch (a) {
+    case Alphabet::A:
+        return 'A';
+    case Alphabet::C:
+        return 'C';
+    case Alphabet::G:
+        return 'G';
+    case Alphabet::T:
+        return 'T';
+    default:
+        return 'A';
+    }
+};
+
+//handles the case when b>=64
+inline u64 safe_lbitshift(u64 a, u64 b) {
+    return (b >= 64) ? 0 : a << b;
+}
+//gets bitmask of length len, safe for len>=64
+inline u64 bitmask_len(u64 len) {
+    return safe_lbitshift(1, len) - 1;
+}
+//ORs the bit at position bit in bitvector with state
+template <template <typename> typename V>
+inline void set_bitvector_bit(V<u64>& bitvector, u64 bit,bool state) {
+    bitvector[bit / 64] |= (1ULL << (bit % 64))*state;
+}
+template <template <typename> typename V>
+inline bool get_bitvector_bit(V<u64>& bitvector, u64 bit) {
+    return (bitvector[bit / 64] >> (bit % 64)) & 1;
+}
+//gets the 2 bit Alphabet value at 2 bit position indx in bitvector
+template <template <typename> typename V>
+inline u8 access_alphabet_val(V<u64>& bitvector, u64 indx) {
+    return (bitvector[indx / chars_per_u64] >> ((indx % chars_per_u64)*bits_per_char)) & alphabet_char_mask;
+}
+//copies len bits from `from` to `to`, starting at `start_from` and `start_to` respectively
+//~ no check that it fits in V_to / exists fully in V_from
+template<template <typename> typename V_from, template <typename> typename V_to>
+inline void copy_bitvector(V_from<u64>& from,V_to<u64>& to, u64 start_from, i64 len, u64 start_to){
+    if(len<=0){
+        return;
+    }
+    u64 off_from = start_from%u64_bits;
+    u64 off_to = start_to%u64_bits;
+    i64 end_from = start_from+len;
+    if(off_to!=0){//make sure off_to is 0
+        to[start_to/u64_bits] &= bitmask_len(off_to);//leave only lower bits
+        to[start_to/u64_bits] |= (
+                (from[start_from/u64_bits]>>off_from)//only top bits
+                & bitmask_len(len)//only as much bits as len
+            )<<off_to;//shift to correct position
+
+        u64 num=min(64-off_from,64-off_to);//actual amount of bits copied
+        //update all of these
+        start_from+=num;
+        start_to+=num;
+        len-=num;
+        off_from = start_from%u64_bits;
+        off_to = start_to%u64_bits;
+
+        //if off_to is still not 0, then we consumed 64-off_from bits (or len), 
+        //get more until off_to is 0
+        if(off_to!=0 && len>0){
+            to[start_to/u64_bits] &= bitmask_len(off_to);
+            to[start_to/u64_bits] |= (//repeat like before
+                    (from[start_from/u64_bits]>>off_from)
+                    & bitmask_len(len)
+                )<<off_to;
+
+            start_from+=64-off_to;
+            start_to+=64-off_to;
+            len-=64-off_to;
+            off_from = start_from%u64_bits;
+            //off_to is now known to be 0, unused from here on
+        }
+    }
+    if(len<=0){
+        return;
+    }
+    u64 j=start_to;
+    if(off_from==0){
+        //only len-64 are guaranteed to be full, so no bitmask is needed
+        //end_from-64 == start_from+len-64
+        i64 i=start_from;
+        for(; i < end_from-64; i+=64){
+            to[j/u64_bits] = from[i/u64_bits];
+            j+=64;
+        }
+        //j/u64_bits is guaranteed to point to the last u64 in "to"
+        //bitshift by len%64 since start_from%64==0 and i%64==0 and we want (start_from+len-i)
+        //could also bitshift by mod(len-1,64)+1, but end_from-i is simpler
+        to[j/u64_bits] = from[i/u64_bits] & bitmask_len(end_from-i);
+    }else{
+        i64 i=start_from;
+        //case when off_from!=0, so need to do two accesses per each "to" u64
+        //off_from and off_from2 never change
+        off_from = i%u64_bits;//offset for first access; length of second access
+        u64 off_from2 = 64-off_from;//offset for second access; length of first access
+        //like before, only len-64 are guaranteed to be full, so no bitmask is needed
+        for(; i < end_from-64;){
+            to[j/u64_bits] = (from[i/u64_bits]>>off_from);//put top "from" bits into bottom of "to"
+            i+=off_from2;
+            // to[j/u64_bits] |= (from[i/u64_bits]&(full_u64_mask>>off_from2))<<off_from2;
+            //no bitmask needed since bitshift already removes top bits
+            to[j/u64_bits] |= (from[i/u64_bits]<<off_from2);
+            i+=off_from;//by here i+=64
+            j+=64;
+        }
+        //do one more iteration but with len masking and second access only if len>0
+        //j/u64_bits is guaranteed to point to the last u64 in "to"
+        //start+len-i == len from position i
+        to[j/u64_bits] = (from[i/u64_bits]>>off_from) & bitmask_len(end_from-i);
+        i+=off_from2;
+        if(i<end_from){//only do second access if there are bits left
+            to[j/u64_bits] |= (from[i/u64_bits] & bitmask_len(end_from-i))<<off_from2;
+        }
+    }
+}
+
 
 const u64 bitvector_pad_u64s = 4;//gpu rank scans in batches of 4, so to avoid bounds checking, pad by 4
 const u64 bitvector_pad_bits = u64_bits*4;
@@ -80,7 +226,7 @@ const u64 batch_buf_bytes = (1<<20);//1MB
 const u64 batch_buf_u64s = ceil_div_const(batch_buf_bytes, sizeof(u64));
 // static_assert((batch_buf_size % sizeof(u64) == 0), "batch_buf_size must be a multiple of sizeof(u64)");
 
-const u64 max_read_chars = 100;
+const u64 max_read_chars = 128;//!must be sufficiently larger than k (like 3+ times)
 const u64 batches_in_stream = 16;
 const u64 max_num_physical_streams = 10;
 //how many normal sized batches are processed in the gpu at the same time
@@ -94,6 +240,7 @@ const u64 gpu_readers = 4;
 constexpr double out_compression_ratio = 1.8;
 extern u64 num_physical_streams;
 extern i32 total_threads;
+extern i32 k;
 // const std::vector<u64> nothing_vector;//basically nullptr for offsetvector
 
 // //=File buf section
@@ -163,7 +310,7 @@ class FCVector { // Fixed Capacity Vector
         ++count_;
     }
 
-    // inline T &operator[](i64 index) {
+    // inline T &operator[](i64 index) {//}
     //     if (index >= count_ || index < 0) {
     //}
     inline T &operator[](u64 index) {
@@ -279,7 +426,7 @@ template <typename T> class OffsetVector { // Fixed Capacity Vector
     }
     // explicit OffsetVector(u64 cap, T* ptr) : max_cap_(cap), size_(0), ptr_(ptr) {
     // }
-    OffsetVector(OffsetVector&& other) : 
+    explicit OffsetVector(OffsetVector&& other) : 
     max_cap_(other.max_cap_), size_(other.size_), ptr_(other.ptr_), in_v_off_(other.in_v_off_) {
         other.size_ = 0;
         other.max_cap_ = 0;
@@ -404,6 +551,12 @@ void prints(std::stringstream &ss, T arg, Args&&... args) {
     ((ss << " " << args), ...); // C++17 fold expression to print all arguments with a space in between
 }
 template<typename T, typename... Args>
+void prints_newline(std::stringstream &ss, T arg, Args&&... args) {
+    ss<<arg;
+    ((ss << " " << args), ...); // C++17 fold expression to print all arguments with a space in between
+    ss<<"\n";
+}
+template<typename T, typename... Args>
 std::string prints_new(T arg, Args&&... args) {
     std::stringstream ss;
     ss<<arg;
@@ -487,6 +640,9 @@ class ThrowingIfstream : public std::ifstream {
         // ThrowingIfstream(filename, std::ios::in);
         std::ifstream file(filename);
         return file.good();
+    }
+    static u64 check_filesize(const std::string &filename) {
+        return std::filesystem::file_size(filename);
     }
 
     //bool for not end of file

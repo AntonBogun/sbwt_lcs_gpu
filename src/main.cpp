@@ -35,6 +35,7 @@ namespace sbwt_lcs_gpu {
     i32 DemultiplexMS::num_threads = 0;
     i32 WriteBufMS::num_threads = 0;
     i32 total_threads = 0;
+    i32 k=0;
 }//namespace sbwt_lcs_gpu
 using namespace sbwt_lcs_gpu;
 
@@ -157,11 +158,13 @@ int main(int argc, char *argv[]) {
     int i = 1;
     std::string sbwt_file;
     std::vector<std::string> in_files;
+    std::vector<i64> in_sizes;
     // bool in_file_toggle = false;
     std::vector<std::string> out_files;
     // bool out_file_toggle = false;
     std::string in_list_file;
     std::string out_list_file;
+    bool use_GPU = 1;
     ParseToggle file_toggle = ParseToggle::None;
     // std::cout<<"parsing"<<std::endl;//!debug
     while (i < argc) {
@@ -196,6 +199,33 @@ int main(int argc, char *argv[]) {
             // out_file_toggle = true;
             file_toggle = ParseToggle::Out;
             continue;
+        } else if (s.compare("-gpu") == 0) {
+            if (i>=argc) return cerr_and_return("Missing argument for -gpu", error_exit_code);
+            try {
+                int gpu_arg = std::stoi(argv[i++]);
+                if (gpu_arg!=0 && gpu_arg!=1) {
+                    return cerr_and_return("Invalid argument for -gpu: "+std::to_string(gpu_arg), error_exit_code);
+                }
+                use_GPU = gpu_arg;
+            } catch (std::invalid_argument& e) {
+                return cerr_and_return("Invalid argument for -gpu", error_exit_code);
+            } catch (std::out_of_range& e) {
+                return cerr_and_return("Argument for -gpu out of range", error_exit_code);
+            }
+        } else if (s.compare("-h") == 0 || s.compare("--help") == 0) {
+            std::stringstream ss;
+            ss<<"Arguments:\n";
+            ss<<"-sbwt <sbwt_file> : SBWT file\n";
+            ss<<"-if <in_list_file> : Input list file\n";
+            ss<<"-of <out_list_file> : Output list file\n";
+            ss<<"-i <in_file1> <in_file2> ... : Input files\n";
+            ss<<"-o <out_file1> <out_file2> ... : Output files\n";
+            ss<<"Note: cannot use -if and -i together; -of and -o together,\n";
+            ss<<"      amount of input files must match amount of output files\n";
+            ss<<"-gpu <0/1> : Use GPU (default 1)\n";
+            ss<<"-h, --help : Show this help message\n";
+            std::cout<<ss.str();
+            return 0;
         } else if (file_toggle==ParseToggle::In) {
             in_files.push_back(s);
             continue;
@@ -203,9 +233,8 @@ int main(int argc, char *argv[]) {
         } else if (file_toggle==ParseToggle::Out) {
             out_files.push_back(s);
             continue;
-
         } else {
-            return cerr_and_return("Unknown argument: " + s, error_exit_code);
+            return cerr_and_return("Unknown argument: "+s+"\nuse -h or --help for help", error_exit_code);
         }
         // in_file_toggle = false;
         // out_file_toggle = false;
@@ -214,7 +243,9 @@ int main(int argc, char *argv[]) {
     //=end of parsing
     {
         sanity_test_cpu();
-        sanity_test_gpu();
+        if(use_GPU){
+            sanity_test_gpu();
+        }
         std::cout << "sanity tests passed" << std::endl;   
     }
 
@@ -277,7 +308,7 @@ int main(int argc, char *argv[]) {
     all_files.insert(all_files.end(), in_files.begin(), in_files.end());
     all_files.insert(all_files.end(), out_files.begin(), out_files.end());
     std::sort(all_files.begin(), all_files.end());
-    for(size_t i = 1; i < all_files.size(); ++i){
+    for(u64 i = 1; i < all_files.size(); ++i){
         if(all_files[i] == all_files[i-1]){
             return cerr_and_return("Duplicate file: " + all_files[i], error_exit_code);
         }
@@ -303,9 +334,16 @@ int main(int argc, char *argv[]) {
     })){
         return cerr_and_return("Invalid output file: " + invalid_file, error_exit_code);
     }
+    //=check each file size>0
+    for(u64 i = 0; i < in_files.size(); ++i){
+        in_sizes.push_back(ThrowingIfstream::check_filesize(in_files[i]));
+        if(in_sizes.back() == 0){
+            return cerr_and_return("Input file is empty: " + in_files[i], error_exit_code);
+        }
+    }
 
 
-    auto streams=balance_files(in_files, out_files);
+    auto streams=balance_files(in_files, in_sizes, out_files);
     num_physical_streams=min(streams.size(),max_num_physical_streams); 
     update_sections();
 
@@ -328,10 +366,6 @@ int main(int argc, char *argv[]) {
     }
 
     //print free cpu and gpu memory
-    enum class DeviceType {
-        CPU,
-        GPU
-    };
     auto print_mem = [](DeviceType device) {
         auto [size, mult, readable] = bytesToHumanReadable(device == DeviceType::CPU ? get_free_cpu_memory() : get_free_gpu_memory());
         std::cout << (device == DeviceType::CPU ? "CPU" : "GPU") << " free memory: " << readable << std::endl;
@@ -339,7 +373,9 @@ int main(int argc, char *argv[]) {
     // std::cout << "free_cpu_memory: " << get_free_cpu_memory() << std::endl;
     // std::cout << "free_gpu_memory: " << get_free_gpu_memory() << std::endl;
     print_mem(DeviceType::CPU);
-    print_mem(DeviceType::GPU);
+    if(use_GPU){
+        print_mem(DeviceType::GPU);
+    }
 
     // print the supported cuda devices
     // print_supported_devices();
@@ -349,6 +385,11 @@ int main(int argc, char *argv[]) {
     sbwt_cpu.load_from_file(sbwt_file);
     sbwt_cpu.print_info();
     u64 kmer_size = sbwt_cpu.get_kmer_size();
+    k=kmer_size;
+    if(k>32){
+        return cerr_and_return("kmer size greater than 32 not supported: " + std::to_string(k), error_exit_code);
+        //!also must check against max_read_chars
+    }
     u64 num_bits = sbwt_cpu.get_num_bits();
 
     // i64 num_cpu_threads = std::string(std::getenv("NUM_CPU_THREADS")).empty() ? std::thread::hardware_concurrency() : std::stoi(std::getenv("NUM_CPU_THREADS"));
@@ -362,8 +403,6 @@ int main(int argc, char *argv[]) {
         }
     }
     // std::cout << "thread_concurrency: " << thread_concurrency << std::endl;
-    std::cout << "free_cpu_memory: " << get_free_cpu_memory() << std::endl;
-    std::cout << "free_gpu_memory: " << get_free_gpu_memory() << std::endl;
 
     //print slurm variables
     // const char* slurm_cpus_per_task = std::getenv("SLURM_CPUS_PER_TASK");
@@ -376,43 +415,103 @@ int main(int argc, char *argv[]) {
     // std::cout << "SLURM_CPUS_PER_GPU: " << (slurm_cpus_per_gpu == nullptr ? "null" : slurm_cpus_per_gpu) << std::endl;
     // const char* slurm_mem_per_cpu = std::getenv("SLURM_MEM_PER_CPU");
     // std::cout << "SLURM_MEM_PER_CPU: " << (slurm_mem_per_cpu == nullptr ? "null" : slurm_mem_per_cpu) << std::endl;
-    SBWTContainerGPU sbwt_gpu(sbwt_cpu);
-    std::cout << "built gpu sbwt" << std::endl;
+    if(use_GPU){
+        SBWTContainerGPU sbwt_gpu(sbwt_cpu);
+        std::cout << "built gpu sbwt" << std::endl;
+    }
     // std::cout << "free_cpu_memory: " << get_free_cpu_memory() << std::endl;
     // std::cout << "free_gpu_memory: " << get_free_gpu_memory() << std::endl;
     print_mem(DeviceType::CPU);
-    print_mem(DeviceType::GPU);
+    if(use_GPU){
+        print_mem(DeviceType::GPU);
+    }
 
     sbwt_cpu.clear();//not needed anymore
     std::cout << "cleared cpu sbwt" << std::endl;
     // std::cout << "free_cpu_memory: " << get_free_cpu_memory() << std::endl;
     // std::cout << "free_gpu_memory: " << get_free_gpu_memory() << std::endl;
     print_mem(DeviceType::CPU);
-    print_mem(DeviceType::GPU);
+    if(use_GPU){
+        print_mem(DeviceType::GPU);
+    }
     std::cout<<"\n\n";
     std::cout << formatAllSections() << std::endl;
     //make sure enough memory
     if(get_free_cpu_memory() < 1.1*MemoryPositions::total * sizeof(u64)){
+        print_mem(DeviceType::CPU);
         return cerr_and_return("Not enough free CPU memory", error_exit_code);
     }
-    if(get_free_gpu_memory() < 1.05*GPUSection::u64s * sizeof(u64)){
-        return cerr_and_return("Not enough free GPU memory", error_exit_code);
+    if(use_GPU){
+        if(get_free_gpu_memory() < 1.05*GPUSection::u64s * sizeof(u64)){
+            print_mem(DeviceType::GPU);
+            return cerr_and_return("Not enough free GPU memory", error_exit_code);
+        }
     }
     //allocate memory
     Timer timer;
     timer.start("allocating memory");
     std::vector<u64> memory(MemoryPositions::total);
     timer.stop("allocating memory");
-    timer.start("allocating gpu memory");
-    GpuPointer<u64> gpu_memory(GPUSection::u64s);
-    timer.stop("allocating gpu memory");
+    if(use_GPU){
+        timer.start("allocating gpu memory");
+        GpuPointer<u64> gpu_memory(GPUSection::u64s);
+        timer.stop("allocating gpu memory");
+    }
     std::cout << "allocated memory" << std::endl;
-    std::cout << "free_cpu_memory: " << get_free_cpu_memory() << std::endl;
-    std::cout << "free_gpu_memory: " << get_free_gpu_memory() << std::endl;
+    print_mem(DeviceType::CPU);
+    if(use_GPU){
+        print_mem(DeviceType::GPU);
+    }
 
     std::cout << "threads available: " << num_cpu_threads << std::endl;
     std::cout << "total threads: " << total_threads << std::endl;
 
+    // FileReadWorker gen_MS(stream_sizes[0], num_streams[0],   max_readers[0], max_writers[0],  max_readers_per_stream[0], max_writers_per_stream[0],  write_chunk_sizes[0], n);
+    
+    FileReadMS file_read_MS(streams);
+    FileBufMS file_buf_MS(memory);
+    ParseMS parse_MS(memory);
+    DebugWriteBufMS debug_write_buf_MS(memory);
+    FileOutMS file_out_MS(streams);
+    //     gen_MS.setup_connections(nullptr,nullptr,nullptr, &middle_MS.self_hint, &middle_MS.id_map);
+    // middle_MS.setup_connections(&gen_MS.m, &gen_MS.cv_S0, &gen_MS.allocate_hint, &group_MS.self_hint, &group_MS.id_map);
+    // group_MS.setup_connections(&middle_MS.m, &middle_MS.cv_S0, &middle_MS.allocate_hint, &end_buf_MS.self_hint, &end_buf_MS.id_map);
+    // end_buf_MS.setup_connections(&group_MS.m, &group_MS.cv_S0, &group_MS.allocate_hint, &end_MS.self_hint, &end_MS.id_map);
+    // end_MS.setup_connections(&end_buf_MS.m, &end_buf_MS.cv_S0, &end_buf_MS.allocate_hint, nullptr, nullptr);
+    file_read_MS.setup_connections(nullptr, nullptr, nullptr, &file_buf_MS.self_hint, &file_buf_MS.id_map);
+    file_buf_MS.setup_connections(&file_read_MS.m, &file_read_MS.cv_S0, &file_read_MS.allocate_hint, &parse_MS.self_hint, &parse_MS.id_map);
+    parse_MS.setup_connections(&file_buf_MS.m, &file_buf_MS.cv_S0, &file_buf_MS.allocate_hint, &debug_write_buf_MS.self_hint, &debug_write_buf_MS.id_map);
+    debug_write_buf_MS.setup_connections(&parse_MS.m, &parse_MS.cv_S0, &parse_MS.allocate_hint, &file_out_MS.self_hint, &file_out_MS.id_map);
+    file_out_MS.setup_connections(&debug_write_buf_MS.m, &debug_write_buf_MS.cv_S0, &debug_write_buf_MS.allocate_hint, nullptr, nullptr);
+
+    FileReadWorker file_read_worker(file_read_MS, file_buf_MS);
+    FileBufWorker file_buf_worker(file_buf_MS, parse_MS);
+    DebugParseWorker debug_parse_worker(parse_MS, debug_write_buf_MS);
+    DebugWriteBufWorker debug_write_buf_worker(debug_write_buf_MS, file_out_MS);
+
+    auto worker_loop=[&](){
+        bool file_read_finished = false;
+        bool file_buf_finished = false;
+        bool debug_parse_finished = false;
+        bool debug_write_buf_finished = false;
+        while(true){
+            if(!file_read_finished){
+                file_read_finished=file_read_worker.run_single();
+            }
+            if(!file_buf_finished){
+                file_buf_finished=file_buf_worker.run_single();
+            }
+            if(!debug_parse_finished){
+                debug_parse_finished=debug_parse_worker.run_single();
+            }
+            if(!debug_write_buf_finished){
+                debug_write_buf_finished=debug_write_buf_worker.run_single();
+            }
+            if(file_read_finished && file_buf_finished && debug_parse_finished && debug_write_buf_finished){
+                break;
+            }
+        }
+    };
 
     // uint64_t size = static_cast<uint64_t>(2) * 1024 * 1024 * 1024 / sizeof(uint64_t);
     // std::vector<uint64_t> array(size);
