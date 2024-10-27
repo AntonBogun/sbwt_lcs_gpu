@@ -31,7 +31,7 @@ static std::mutex io_mutex;
 // };
 //u64s
 struct MemoryPositions {
-    // static const u64 file_buf = 0;
+    // static constexpr u64 file_buf = 0;
     // static u64 parse;
     // static u64 multiplex;
     // static u64 demultiplex;
@@ -64,7 +64,7 @@ struct MemoryPositions {
 class FileReadStream: public CB_data<FileReadStream>{
     public:
     i64 current_file=0;
-    static const u64 logic_batch_size = batch_buf_u64s*sizeof(u64);
+    static constexpr u64 logic_batch_size = batch_buf_u64s*sizeof(u64);
     FILE* file=nullptr;
     //no logic_batch_size here since v_r is not used
     FileReadStream(i64 _size, i32 _max_writers, i32 _max_readers): 
@@ -129,10 +129,10 @@ class FileReadMS: public SharedThreadMultistream<FileReadMS,FileReadStream>{
 };
 class FileBufStream: public CB_data<FileBufStream>{
     public:
-    static const u64 batch_u64s = batch_buf_u64s;
-    static const u64 u64s=batches_in_stream*batch_u64s;
-    static const u64 logic_batch_size = batch_buf_u64s*sizeof(u64);
-    static const u64 logic_size = batches_in_stream*logic_batch_size;
+    static constexpr u64 batch_u64s = batch_buf_u64s;
+    static constexpr u64 u64s=batches_in_stream*batch_u64s;
+    static constexpr u64 logic_batch_size = batch_buf_u64s*sizeof(u64);
+    static constexpr u64 logic_size = batches_in_stream*logic_batch_size;
     //the entire stream data, not batch
     OffsetVector<char> stream_data;
     std::vector<BatchFileBufInfo> batch_info;
@@ -144,7 +144,7 @@ class FileBufStream: public CB_data<FileBufStream>{
 class FileBufMS: public SharedThreadMultistream<FileBufMS,FileBufStream>{
     public:
     static u64 u64s; //depends on number of streams
-    static const u64 data_offset = 0;//in u64s
+    static constexpr u64 data_offset = 0;//in u64s
     static constexpr bool has_write=true;
     static constexpr bool has_read=true;
     static constexpr StreamType stream_type=SEQUENTIAL;
@@ -184,22 +184,22 @@ enum ParseState {
 };
 class ParseStream: public CB_data<ParseStream>{
     public:
-    static const u64 chars_batch_start=0;
-    static const u64 chars_batch_u64s = batch_buf_u64s;
+    static constexpr u64 chars_batch_start=0;
+    static constexpr u64 chars_batch_u64s = batch_buf_u64s;
 
-    static const u64 seps_batch_start = chars_batch_start + chars_batch_u64s;
-    static const u64 seps_batch_u64s = ceil_div_const(chars_batch_u64s * chars_per_u64, max_read_chars) + 8;
+    static constexpr u64 seps_batch_start = chars_batch_start + chars_batch_u64s;
+    static constexpr u64 seps_batch_u64s = ceil_div_const(chars_batch_u64s * chars_per_u64, max_read_chars) + 8;
 
-    static const u64 seps_bitvector_batch_start = seps_batch_start + seps_batch_u64s;
-    static const u64 seps_bitvector_batch_u64s = ceil_div_const(seps_batch_u64s+8, u64_bits) + bitvector_pad_u64s;
+    static constexpr u64 seps_bitvector_batch_start = seps_batch_start + seps_batch_u64s;
+    static constexpr u64 seps_bitvector_batch_u64s = ceil_div_const(seps_batch_u64s+8, u64_bits) + bitvector_pad_u64s;
 
-    static const u64 seps_rank_batch_start = seps_bitvector_batch_start + seps_bitvector_batch_u64s;
-    static const u64 seps_rank_batch_u64s = poppysmall_from_bitvector_u64s_const(seps_bitvector_batch_u64s);
+    static constexpr u64 seps_rank_batch_start = seps_bitvector_batch_start + seps_bitvector_batch_u64s;
+    static constexpr u64 seps_rank_batch_u64s = poppysmall_from_bitvector_u64s_const(seps_bitvector_batch_u64s);
 
-    static const u64 batch_u64s = chars_batch_u64s + seps_batch_u64s + seps_bitvector_batch_u64s + seps_rank_batch_u64s;
-    static const u64 u64s = batch_u64s * batches_in_stream;
-    static const u64 logic_batch_size = chars_batch_u64s*chars_per_u64;
-    static const u64 logic_size = batches_in_stream*logic_batch_size;
+    static constexpr u64 batch_u64s = chars_batch_u64s + seps_batch_u64s + seps_bitvector_batch_u64s + seps_rank_batch_u64s;
+    static constexpr u64 u64s = batch_u64s * batches_in_stream;
+    static constexpr u64 logic_batch_size = chars_batch_u64s*chars_per_u64;
+    static constexpr u64 logic_size = batches_in_stream*logic_batch_size;
 
     const i32 k_;//local copy of k
     OffsetVector<u64> stream_data;
@@ -290,27 +290,27 @@ class ParseMS: public SharedThreadMultistream<ParseMS,ParseStream>{
 
 class MultiplexStream: public CB_data<MultiplexStream>{
     public:
-    static const u64 chars_batch_section_start = 0;
-    static const u64 chars_batch_section_u64s = ParseStream::chars_batch_u64s * gpu_batch_mult;
+    static constexpr u64 chars_batch_section_start = 0;
+    static constexpr u64 chars_batch_section_u64s = ParseStream::chars_batch_u64s * gpu_batch_mult;
 
-    static const u64 seps_batch_section_start = chars_batch_section_start + chars_batch_section_u64s;
-    static const u64 seps_batch_section_u64s = ParseStream::seps_batch_u64s * gpu_batch_mult;
+    static constexpr u64 seps_batch_section_start = chars_batch_section_start + chars_batch_section_u64s;
+    static constexpr u64 seps_batch_section_u64s = ParseStream::seps_batch_u64s * gpu_batch_mult;
 
-    static const u64 seps_bitvector_batch_section_start = seps_batch_section_start + seps_batch_section_u64s;
-    static const u64 seps_bitvector_batch_section_u64s = ParseStream::seps_bitvector_batch_u64s * gpu_batch_mult;
+    static constexpr u64 seps_bitvector_batch_section_start = seps_batch_section_start + seps_batch_section_u64s;
+    static constexpr u64 seps_bitvector_batch_section_u64s = ParseStream::seps_bitvector_batch_u64s * gpu_batch_mult;
 
-    static const u64 seps_rank_batch_section_start = seps_bitvector_batch_section_start + seps_bitvector_batch_section_u64s;
-    static const u64 seps_rank_batch_section_u64s = ParseStream::seps_rank_batch_u64s * gpu_batch_mult;
+    static constexpr u64 seps_rank_batch_section_start = seps_bitvector_batch_section_start + seps_bitvector_batch_section_u64s;
+    static constexpr u64 seps_rank_batch_section_u64s = ParseStream::seps_rank_batch_u64s * gpu_batch_mult;
 
-    static const u64 thread_lookup_vector_start = seps_rank_batch_section_start + seps_rank_batch_section_u64s;
-    static const u64 thread_lookup_vector_u64s = sizeof(GPUThreadLookupTableEntry) * gpu_batch_mult / sizeof(u64);
+    static constexpr u64 thread_lookup_vector_start = seps_rank_batch_section_start + seps_rank_batch_section_u64s;
+    static constexpr u64 thread_lookup_vector_u64s = sizeof(GPUThreadLookupTableEntry) * gpu_batch_mult / sizeof(u64);
 
-    static const u64 batch_section_u64s = chars_batch_section_u64s + seps_batch_section_u64s + seps_bitvector_batch_section_u64s + seps_rank_batch_section_u64s + thread_lookup_vector_u64s;
-    static const u64 u64s = batch_section_u64s * batches_in_gpu_stream; //~for now do not scale batches with number of streams
+    static constexpr u64 batch_section_u64s = chars_batch_section_u64s + seps_batch_section_u64s + seps_bitvector_batch_section_u64s + seps_rank_batch_section_u64s + thread_lookup_vector_u64s;
+    static constexpr u64 u64s = batch_section_u64s * batches_in_gpu_stream; //~for now do not scale batches with number of streams
 
-    static const u64 logic_batch_size = 1;
-    static const u64 logic_gpu_batch_size = gpu_batch_mult*logic_batch_size;
-    static const u64 logic_size = batches_in_gpu_stream*logic_gpu_batch_size;
+    static constexpr u64 logic_batch_size = 1;
+    static constexpr u64 logic_gpu_batch_size = gpu_batch_mult*logic_batch_size;
+    static constexpr u64 logic_size = batches_in_gpu_stream*logic_gpu_batch_size;
 
     OffsetVector<u64> stream_data;
     GpuPointer<u64> stream_gpu_data;
@@ -321,15 +321,15 @@ class MultiplexStream: public CB_data<MultiplexStream>{
     MultiplexStream(i64 _size, i32 _max_writers, i32 _max_readers, OffsetVector<u64>&& _data, GpuPointer<u64>&& _gpu_data);
 };
 struct GPUSection {
-    static const u64 in_batch_u64s = MultiplexStream::batch_section_u64s;
-    static const u64 out_batch_u64s = MultiplexStream::chars_batch_section_u64s * chars_per_u64+100;//1 u64 per char + padding
-    static const u64 in_u64s = in_batch_u64s * batches_in_gpu_stream; //~for now do not scale batches with number of streams
-    static const u64 out_u64s = out_batch_u64s * batches_in_gpu_stream; //~for now do not scale batches with number of streams
+    static constexpr u64 in_batch_u64s = MultiplexStream::batch_section_u64s;
+    static constexpr u64 out_batch_u64s = MultiplexStream::chars_batch_section_u64s * chars_per_u64+100;//1 u64 per char + padding
+    static constexpr u64 in_u64s = in_batch_u64s * batches_in_gpu_stream; //~for now do not scale batches with number of streams
+    static constexpr u64 out_u64s = out_batch_u64s * batches_in_gpu_stream; //~for now do not scale batches with number of streams
     
-    static const u64 start_in = 0;
-    static const u64 start_out = in_u64s;
+    static constexpr u64 start_in = 0;
+    static constexpr u64 start_out = in_u64s;
 
-    static const u64 u64s = in_u64s + out_u64s; //~for now do not scale batches with number of streams
+    static constexpr u64 u64s = in_u64s + out_u64s; //~for now do not scale batches with number of streams
 };
 MultiplexStream::MultiplexStream(i64 _size, i32 _max_writers, i32 _max_readers, OffsetVector<u64>&& _data, GpuPointer<u64>&& _gpu_data):
         CB_data(_size, _max_writers, _max_readers),
@@ -366,7 +366,7 @@ class MultiplexMS: public SharedThreadMultistream<MultiplexMS,MultiplexStream>{
     static constexpr StreamType stream_type=PARALLEL;
     static i32 num_threads;
     //for now, only one stream
-    static const u64 u64s = MultiplexStream::u64s;//~for now do not scale batches with number of streams
+    static constexpr u64 u64s = MultiplexStream::u64s;//~for now do not scale batches with number of streams
     static u64 data_offset;
     OffsetVector<u64> section_data;
     GpuPointer<u64> gpu_data;
@@ -395,11 +395,11 @@ class MultiplexMS: public SharedThreadMultistream<MultiplexMS,MultiplexStream>{
 };
 class DemultiplexStream: public CB_data<DemultiplexStream>{
     public:
-    static const u64 indexes_batch_u64s = GPUSection::out_batch_u64s;
-    static const u64 u64s = indexes_batch_u64s * batches_in_gpu_stream; //~for now do not scale batches with number of streams
-    static const u64 logic_batch_size = MultiplexStream::logic_batch_size;
-    static const u64 logic_gpu_batch_size = MultiplexStream::logic_gpu_batch_size;
-    static const u64 logic_size = MultiplexStream::logic_size;
+    static constexpr u64 indexes_batch_u64s = GPUSection::out_batch_u64s;
+    static constexpr u64 u64s = indexes_batch_u64s * batches_in_gpu_stream; //~for now do not scale batches with number of streams
+    static constexpr u64 logic_batch_size = MultiplexStream::logic_batch_size;
+    static constexpr u64 logic_gpu_batch_size = MultiplexStream::logic_gpu_batch_size;
+    static constexpr u64 logic_size = MultiplexStream::logic_size;
 
     OffsetVector<u64> stream_data;
     GpuPointer<u64> stream_gpu_data;
@@ -418,7 +418,7 @@ class DemultiplexStream: public CB_data<DemultiplexStream>{
 };
 class DemultiplexMS: public SharedThreadMultistream<DemultiplexMS,DemultiplexStream>{
     public:
-    static const u64 u64s=DemultiplexStream::u64s;//~for now do not scale batches with number of streams
+    static constexpr u64 u64s=DemultiplexStream::u64s;//~for now do not scale batches with number of streams
     static u64 data_offset;
     static constexpr bool has_write=true;
     static constexpr bool has_read=true;
@@ -455,10 +455,10 @@ class DemultiplexMS: public SharedThreadMultistream<DemultiplexMS,DemultiplexStr
 //!probably have to add queue and a mutex for the queue
 class WriteBufStream: public CB_data<WriteBufStream>{
     public:
-    static const u64 batch_u64s = ceil_double_div_const(ceil_div_const(DemultiplexStream::indexes_batch_u64s,gpu_batch_mult), out_compression_ratio);
-    static const u64 u64s=batches_in_out_buf_stream*batch_u64s;
-    static const u64 logic_batch_size = batch_u64s*sizeof(u64);
-    static const u64 logic_size = batches_in_out_buf_stream*logic_batch_size;
+    static constexpr u64 batch_u64s = ceil_double_div_const(ceil_div_const(DemultiplexStream::indexes_batch_u64s,gpu_batch_mult), out_compression_ratio);
+    static constexpr u64 u64s=batches_in_out_buf_stream*batch_u64s;
+    static constexpr u64 logic_batch_size = batch_u64s*sizeof(u64);
+    static constexpr u64 logic_size = batches_in_out_buf_stream*logic_batch_size;
     OffsetVector<u8> stream_data;
     std::vector<BatchFileBufInfo> batch_info;
     bool ended=false;
@@ -498,10 +498,10 @@ class WriteBufMS: public SharedThreadMultistream<WriteBufMS,WriteBufStream>{
 //DEBUG
 class DebugWriteBufStream: public CB_data<DebugWriteBufStream>{
     public:
-    static const u64 batch_u64s = ceil_div_const(ParseStream::logic_batch_size+ParseStream::seps_batch_u64s,sizeof(u64));
-    static const u64 u64s=batches_in_out_buf_stream*batch_u64s;
-    static const u64 logic_batch_size = batch_u64s*sizeof(u64);
-    static const u64 logic_size = batches_in_out_buf_stream*logic_batch_size;
+    static constexpr u64 batch_u64s = ceil_div_const(ParseStream::logic_batch_size+ParseStream::seps_batch_u64s,sizeof(u64));
+    static constexpr u64 u64s=batches_in_out_buf_stream*batch_u64s;
+    static constexpr u64 logic_batch_size = batch_u64s*sizeof(u64);
+    static constexpr u64 logic_size = batches_in_out_buf_stream*logic_batch_size;
     OffsetVector<u8> stream_data;
     std::vector<BatchFileBufInfo> batch_info;
     bool ended=false;
@@ -542,7 +542,7 @@ class DebugWriteBufMS: public SharedThreadMultistream<DebugWriteBufMS,DebugWrite
 class FileOutStream: public CB_data<FileOutStream>{
     public:
     i64 current_file=0;
-    static const u64 logic_batch_size = WriteBufStream::logic_batch_size;
+    static constexpr u64 logic_batch_size = WriteBufStream::logic_batch_size;
     FILE* file=nullptr;
     i64 fileid=-1;
     FileOutStream(i64 _size, i32 _max_writers, i32 _max_readers): 
