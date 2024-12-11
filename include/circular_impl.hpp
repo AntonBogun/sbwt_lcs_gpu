@@ -15,7 +15,6 @@ static std::mutex io_mutex;
 
 
 
-
 // constexpr u64 poppysmall_from_bitvector_u64s_const(u64 num_u64s);
 // struct FileBufSection {
 // };
@@ -40,8 +39,26 @@ struct MemoryPositions {
     // static u64 gpu; //gpu allocated separately
 };
 
-
-
+auto timenow(){
+  return std::chrono::high_resolution_clock::now();
+}
+auto timeinsec(std::chrono::high_resolution_clock::duration t){
+  return std::chrono::duration<double>(t);
+}
+auto timeinmsec(std::chrono::high_resolution_clock::duration t){
+  return std::chrono::duration<double, std::milli>(t);
+}
+auto mscputime_from(std::clock_t t){
+  return 1000.0*(std::clock()-t)/CLOCKS_PER_SEC;
+}
+extern std::chrono::duration<double> d_reader;
+extern std::chrono::duration<double> d_parser;
+extern std::chrono::duration<double> d_decoder;
+extern std::chrono::duration<double> d_writer;
+extern i64 n_reader;
+extern i64 n_parser;
+extern i64 n_decoder;
+extern i64 n_writer;
 
 //===
 
@@ -59,6 +76,44 @@ struct MemoryPositions {
     std::cout << x << std::endl; \
 } while (0)
 
+// Helper macros to expand variadic arguments
+#define EXPAND(x) x
+#define GET_MACRO(_1,_2,_3,_4,_5,_6,_7,_8,_9,_10,NAME,...) NAME
+
+// Base macros
+#define OUT_0(x) #x ": " << x
+#define OUT_1(x) << ", " #x ": " << x
+
+// Variadic macro to handle multiple arguments
+#define OUT(...) EXPAND(GET_MACRO(__VA_ARGS__, OUT10, OUT9, OUT8, OUT7, OUT6, OUT5, OUT4, OUT3, OUT2, OUT1)(__VA_ARGS__))
+
+// Define macros for different numbers of arguments
+#define OUT1(x1) OUT_0(x1)
+#define OUT2(x1, x2) OUT_0(x1) OUT_1(x2)
+#define OUT3(x1, x2, x3) OUT_0(x1) OUT_1(x2) OUT_1(x3)
+#define OUT4(x1, x2, x3, x4) OUT_0(x1) OUT_1(x2) OUT_1(x3) OUT_1(x4)
+#define OUT5(x1, x2, x3, x4, x5) OUT_0(x1) OUT_1(x2) OUT_1(x3) OUT_1(x4) OUT_1(x5)
+#define OUT6(x1, x2, x3, x4, x5, x6) OUT_0(x1) OUT_1(x2) OUT_1(x3) OUT_1(x4) OUT_1(x5) OUT_1(x6)
+#define OUT7(x1, x2, x3, x4, x5, x6, x7) OUT_0(x1) OUT_1(x2) OUT_1(x3) OUT_1(x4) OUT_1(x5) OUT_1(x6) OUT_1(x7)
+#define OUT8(x1, x2, x3, x4, x5, x6, x7, x8) OUT_0(x1) OUT_1(x2) OUT_1(x3) OUT_1(x4) OUT_1(x5) OUT_1(x6) OUT_1(x7) OUT_1(x8)
+#define OUT9(x1, x2, x3, x4, x5, x6, x7, x8, x9) OUT_0(x1) OUT_1(x2) OUT_1(x3) OUT_1(x4) OUT_1(x5) OUT_1(x6) OUT_1(x7) OUT_1(x8) OUT_1(x9)
+#define OUT10(x1, x2, x3, x4, x5, x6, x7, x8, x9, x10) OUT_0(x1) OUT_1(x2) OUT_1(x3) OUT_1(x4) OUT_1(x5) OUT_1(x6) OUT_1(x7) OUT_1(x8) OUT_1(x9) OUT_1(x10)
+
+
+
+#ifdef DEBUG
+#define DEBUG_PRINTOUT 1
+#else
+#define DEBUG_PRINTOUT 0
+#endif
+
+#if DEBUG_PRINTOUT
+#define DEBUG_PRINT_MPDBG(x) PRINT_MPDBG(x)
+#define DEBUG_PRINT_MPDBG_I(x) PRINT_MPDBG_I(x)
+#else
+#define DEBUG_PRINT_MPDBG(x)
+#define DEBUG_PRINT_MPDBG_I(x)
+#endif
 
 // using FileNameVec = std::vector<std::vector<std::tuple<std::string,std::string,i64>>>;
 class FileReadStream: public CB_data<FileReadStream>{
@@ -92,7 +147,9 @@ class FileReadMS: public SharedThreadMultistream<FileReadMS,FileReadStream>{
     // }
     FileReadMS(std::vector<StreamFilenamesContainer>& _files):
         SharedThreadMultistream(0, num_physical_streams, num_physical_streams, 0, 1, 0),
-        files(_files) {}
+        files(_files){
+            initialize_base(0, num_physical_streams, num_physical_streams, 0, 1, 0);
+        }
     void allocate_impl(i32 stream_indx, i64 id){
         // data[stream_indx].gen_num=gen_num;
         data[stream_indx].id=current_index;
@@ -100,6 +157,7 @@ class FileReadMS: public SharedThreadMultistream<FileReadMS,FileReadStream>{
         data[stream_indx].v_r=data[stream_indx].size;
         data[stream_indx].v_w=0;
         current_index++;
+        DEBUG_PRINT_MPDBG("FileReadMS::allocate_impl, " << OUT(stream_indx, id));
     }
     void deallocate_impl(i32 stream_indx){
         //nothing to do
@@ -107,6 +165,7 @@ class FileReadMS: public SharedThreadMultistream<FileReadMS,FileReadStream>{
         // if(gen_num==gen_max){
         //     final_dealloc();
         // }
+        DEBUG_PRINT_MPDBG("FileReadMS::deallocate_impl, " << OUT(stream_indx));
     }
     bool can_allocate_impl(){
         // return gen_num<gen_max;
@@ -139,7 +198,7 @@ class FileBufStream: public CB_data<FileBufStream>{
     bool ended=false;
     FileBufStream(i64 _size, i32 _max_writers, i32 _max_readers, OffsetVector<char>&& _data):
         CB_data(_size, _max_writers, _max_readers),
-        stream_data(std::move(_data)), batch_info(batches_in_stream) {}
+        stream_data(std::move(_data)), batch_info(batches_in_stream){}
 };
 class FileBufMS: public SharedThreadMultistream<FileBufMS,FileBufStream>{
     public:
@@ -155,8 +214,10 @@ class FileBufMS: public SharedThreadMultistream<FileBufMS,FileBufStream>{
     // FileBufMS(OffsetVector<u64>&& _section_data):
     FileBufMS(std::vector<u64>& memory):
         SharedThreadMultistream(0, num_physical_streams, num_physical_streams, num_physical_streams, 1, 1),
+        section_data(memory, data_offset, u64s, OffsetVectorOpts::SET_MAX_SIZE){
+            initialize_base(0, num_physical_streams, num_physical_streams, num_physical_streams, 1, 1);
+        }
         // section_data(std::move(_section_data)) {}
-        section_data(memory, data_offset, u64s) {}
 
     void emplace_back_data(i64 _1, i32 _2, i32 _3){
         OffsetVector<char> temp(section_data, data.size()*FileBufStream::u64s, FileBufStream::u64s);
@@ -166,21 +227,27 @@ class FileBufMS: public SharedThreadMultistream<FileBufMS,FileBufStream>{
     }
     void allocate_impl(i32 stream_indx, i64 id){
         data[stream_indx].ended=false;
+        DEBUG_PRINT_MPDBG("FileBufMS::allocate_impl, " << OUT(stream_indx, id));
     }
-    void deallocate_impl(i32 stream_indx){}
+    void deallocate_impl(i32 stream_indx){
+        DEBUG_PRINT_MPDBG("FileBufMS::deallocate_impl, " << OUT(stream_indx));
+    }
     i64 get_write_id_impl(i32 stream_indx){return data[stream_indx].id;}
     bool sequential_ended_impl(i32 stream_indx,i64 buf_S, i64 r_size){return data[stream_indx].ended;}
     bool get_is_last_child_impl(i32 stream_indx, i64 buf_E, bool is_last_parent){return is_last_parent;}
     bool get_is_first_parent_impl(i32 stream_indx, bool is_begin){return is_begin;}
 };
 enum ParseState {
-    NEW_FILE,
-    BEGIN_FROM_SKIP,
-    BEGIN_FROM_NEW_READ,
-    BEGIN_FROM_READ,
-    SKIP,
-    SKIP_THEN_READ,
-    READ
+    NEW_FILE,//becomes BEGIN_FROM_SKIP
+    BEGIN_FROM_SKIP,//seq_begin -> skip_then_read, qual_begin -> skip_then_skip, else -> skip
+    BEGIN_FROM_NEW_READ,//same as above but else -> read
+    BEGIN_FROM_READ,//same as above but on change will do finish_seq()
+    SKIP,//skip until newline then BEGIN_FROM_SKIP
+    SKIP_THEN_READ,//skip until newline then BEGIN_FROM_READ
+    //necessary because quality can have @, which is also the start of a new read
+    SKIP_THEN_SKIP,//skip until newline then SKIP_UNTIL_CHAR
+    SKIP_UNTIL_CHAR,//skip until a non-newline then SKIP
+    READ//read until newline then BEGIN_FROM_READ
 };
 class ParseStream: public CB_data<ParseStream>{
     public:
@@ -227,16 +294,17 @@ class ParseStream: public CB_data<ParseStream>{
     }
 
     ParseStream(i64 _size, i32 _max_writers, i32 _max_readers, OffsetVector<u64>&& _data):
-        CB_data(_size, _max_writers, _max_readers), k_(k),
+        CB_data(_size, _max_writers, _max_readers), 
+        k_(k),
         temp_buffer_(ceil_div(max_read_chars,chars_per_u64)*3,0),//max_read_chars*3 should be enough
         temp_buffer(temp_buffer_),
         stream_data(std::move(_data)), batch_info(batches_in_stream), batches(batches_in_stream) {
             for(i32 i=0;i<batches_in_stream;i++){
                 batches.emplace_back(ParseVectorBatch{
-                    OffsetVector<u64>(stream_data, i*batch_u64s+chars_batch_start, chars_batch_u64s),
+                    OffsetVector<u64>(stream_data, i*batch_u64s+chars_batch_start, chars_batch_u64s, OffsetVectorOpts::SET_MAX_SIZE),//!must be fully allocated
                     OffsetVector<u64>(stream_data,  i*batch_u64s+seps_batch_start, seps_batch_u64s),
                     OffsetVector<u64>(stream_data,  i*batch_u64s+seps_bitvector_batch_start, seps_bitvector_batch_u64s),
-                    OffsetVector<u64>(stream_data,  i*batch_u64s+seps_rank_batch_start, seps_rank_batch_u64s)
+                    OffsetVector<u64>(stream_data,  i*batch_u64s+seps_rank_batch_start, seps_rank_batch_u64s, OffsetVectorOpts::SET_MAX_SIZE)//!must also be fully allocated
                 });
                 // batches.back().chars.resize(chars_batch_u64s*sizeof(u64)/sizeof(char));
                 // batches.back().seps.resize(seps_batch_u64s);
@@ -260,7 +328,9 @@ class ParseMS: public SharedThreadMultistream<ParseMS,ParseStream>{
     OffsetVector<u64> section_data;
     ParseMS(std::vector<u64>& memory):
         SharedThreadMultistream(0, num_physical_streams, num_physical_streams, num_physical_streams, 1, 1),
-        section_data(memory, data_offset, u64s) {}
+        section_data(memory, data_offset, u64s, OffsetVectorOpts::SET_MAX_SIZE){
+            initialize_base(0, num_physical_streams, num_physical_streams, num_physical_streams, 1, 1);
+        }
     void emplace_back_data(i64 _1, i32 _2, i32 _3){
         OffsetVector<u64> temp(section_data, data.size()*ParseStream::u64s, ParseStream::u64s);
         // data.back().stream_data.resize(ParseStream::u64s);
@@ -273,8 +343,11 @@ class ParseMS: public SharedThreadMultistream<ParseMS,ParseStream>{
         data[stream_indx].reset();
         //!debug
         // data[stream_indx].ended=false;
+        DEBUG_PRINT_MPDBG("ParseMS::allocate_impl, " << OUT(stream_indx, id));
     }
-    void deallocate_impl(i32 stream_indx){}
+    void deallocate_impl(i32 stream_indx){
+        DEBUG_PRINT_MPDBG("ParseMS::deallocate_impl, " << OUT(stream_indx));
+    }
     i64 get_write_id_impl(i32 stream_indx){
         if constexpr(USE_DEBUG_PARSEMS){//!debug
             return data[stream_indx].id;
@@ -373,8 +446,11 @@ class MultiplexMS: public SharedThreadMultistream<MultiplexMS,MultiplexStream>{
     i64 total_num_streams;
     MultiplexMS(std::vector<u64>& memory, GpuPointer<u64>& _gpu_data, i64 _total_num_streams):
         SharedThreadMultistream(0, 1, gpu_readers, num_physical_streams,  gpu_readers, num_physical_streams),
-        section_data(memory, data_offset, u64s), gpu_data(_gpu_data, GPUSection::start_in, GPUSection::in_u64s),
-        total_num_streams(_total_num_streams) {}
+        section_data(memory, data_offset, u64s, OffsetVectorOpts::SET_MAX_SIZE),
+        gpu_data(_gpu_data, GPUSection::start_in, GPUSection::in_u64s),
+        total_num_streams(_total_num_streams) {
+            initialize_base(0, 1, gpu_readers, num_physical_streams,  gpu_readers, num_physical_streams);
+        }
     void emplace_back_data(i64 _1, i32 _2, i32 _3){
         OffsetVector<u64> temp(section_data, data.size()*MultiplexStream::u64s, MultiplexStream::u64s);
         // data.back().stream_data.resize(MultiplexStream::u64s);
@@ -428,7 +504,10 @@ class DemultiplexMS: public SharedThreadMultistream<DemultiplexMS,DemultiplexStr
     GpuPointer<u64> gpu_data;
     DemultiplexMS(std::vector<u64>& memory, GpuPointer<u64>& _gpu_data):
         SharedThreadMultistream(0, 1, num_physical_streams, gpu_readers,  num_physical_streams, gpu_readers),
-        section_data(memory, data_offset, u64s), gpu_data(_gpu_data, GPUSection::start_out, GPUSection::out_u64s) {}
+        section_data(memory, data_offset, u64s, OffsetVectorOpts::SET_MAX_SIZE),
+        gpu_data(_gpu_data, GPUSection::start_out, GPUSection::out_u64s) {
+            initialize_base(0, 1, num_physical_streams, gpu_readers,  num_physical_streams, gpu_readers);
+        }
     void emplace_back_data(i64 _1, i32 _2, i32 _3){
         OffsetVector<u64> temp(section_data, data.size()*DemultiplexStream::u64s, DemultiplexStream::u64s);
         // data.back().stream_data.resize(DemultiplexStream::u64s);
@@ -477,7 +556,9 @@ class WriteBufMS: public SharedThreadMultistream<WriteBufMS,WriteBufStream>{
     OffsetVector<u64> section_data;
     WriteBufMS(std::vector<u64>& memory):
         SharedThreadMultistream(0, num_physical_streams, num_physical_streams, num_physical_streams, 1, 1),
-        section_data(memory, data_offset, u64s) {}
+        section_data(memory, data_offset, u64s, OffsetVectorOpts::SET_MAX_SIZE) {
+            initialize_base(0, num_physical_streams, num_physical_streams, num_physical_streams, 1, 1);
+        }
     void emplace_back_data(i64 _1, i32 _2, i32 _3){
         OffsetVector<u8> temp(section_data, data.size()*WriteBufStream::u64s, WriteBufStream::u64s);
         // data.back().stream_data.resize(WriteBufStream::u64s*sizeof(u64));
@@ -520,7 +601,9 @@ class DebugWriteBufMS: public SharedThreadMultistream<DebugWriteBufMS,DebugWrite
     OffsetVector<u64> section_data;
     DebugWriteBufMS(std::vector<u64>& memory):
         SharedThreadMultistream(0, num_physical_streams, num_physical_streams, num_physical_streams, 1, 1),
-        section_data(memory, data_offset, u64s) {}
+        section_data(memory, data_offset, u64s, OffsetVectorOpts::SET_MAX_SIZE) {
+            initialize_base(0, num_physical_streams, num_physical_streams, num_physical_streams, 1, 1);
+        }
     void emplace_back_data(i64 _1, i32 _2, i32 _3){
         OffsetVector<u8> temp(section_data, data.size()*DebugWriteBufStream::u64s, DebugWriteBufStream::u64s);
         // data.back().stream_data.resize(DebugWriteBufStream::u64s*sizeof(u64));
@@ -529,8 +612,11 @@ class DebugWriteBufMS: public SharedThreadMultistream<DebugWriteBufMS,DebugWrite
     }
     void allocate_impl(i32 stream_indx, i64 id){
         data[stream_indx].ended=false;
+        DEBUG_PRINT_MPDBG("DebugWriteBufMS::allocate_impl, " << OUT(stream_indx, id));
     }
-    void deallocate_impl(i32 stream_indx){}
+    void deallocate_impl(i32 stream_indx){
+        DEBUG_PRINT_MPDBG("DebugWriteBufMS::deallocate_impl, " << OUT(stream_indx));
+    }
     i64 get_write_id_impl(i32 stream_indx){return data[stream_indx].id;}
     bool sequential_ended_impl(i32 stream_indx,i64 buf_S, i64 r_size){return data[stream_indx].ended;}
     bool get_is_last_child_impl(i32 stream_indx, i64 buf_E, bool is_last_parent){
@@ -541,7 +627,6 @@ class DebugWriteBufMS: public SharedThreadMultistream<DebugWriteBufMS,DebugWrite
 
 class FileOutStream: public CB_data<FileOutStream>{
     public:
-    i64 current_file=0;
     static constexpr u64 logic_batch_size = WriteBufStream::logic_batch_size;
     FILE* file=nullptr;
     i64 fileid=-1;
@@ -556,13 +641,16 @@ class FileOutMS: public SharedThreadMultistream<FileOutMS,FileOutStream>{
     std::vector<StreamFilenamesContainer>& files;
     i64 current_index=0;
     FileOutMS(std::vector<StreamFilenamesContainer>& _files):
-        SharedThreadMultistream(0, num_physical_streams, 0, num_physical_streams, 0, 1),
-        files(_files) {}
+        SharedThreadMultistream(FileOutStream::logic_batch_size, num_physical_streams, 0, num_physical_streams, 0, 1),
+        files(_files) {
+            initialize_base(FileOutStream::logic_batch_size, num_physical_streams, 0, num_physical_streams, 0, 1);
+        }
     void allocate_impl(i32 stream_indx, i64 id){
         //none of this should matter since !has_read
         // data[stream_indx].size=files[current_index].total_length;
         // data[stream_indx].v_w=data[stream_indx].size;
         data[stream_indx].fileid=-1;
+        DEBUG_PRINT_MPDBG("FileOutMS::allocate_impl, " << OUT(stream_indx, id));
     }
     void deallocate_impl(i32 stream_indx){}
     bool get_is_last_child_impl(i32 stream_indx, i64 buf_E, bool is_last_parent){return is_last_parent;}
@@ -583,11 +671,13 @@ void update_sections(){
     DebugWriteBufMS::u64s = DebugWriteBufStream::u64s * num_physical_streams;//!debug
 
     ParseMS::data_offset = FileBufMS::data_offset + FileBufMS::u64s;
+
     MultiplexMS::data_offset = ParseMS::data_offset + ParseMS::u64s;
     DemultiplexMS::data_offset = MultiplexMS::data_offset + MultiplexMS::u64s;
     WriteBufMS::data_offset = DemultiplexMS::data_offset + DemultiplexMS::u64s;
-    DebugWriteBufMS::data_offset = ParseMS::data_offset + ParseMS::u64s;//!debug
     // MemoryPositions::total = WriteBufMS::data_offset + WriteBufMS::u64s;//!debug
+
+    DebugWriteBufMS::data_offset = ParseMS::data_offset + ParseMS::u64s;//!debug
     MemoryPositions::total = DebugWriteBufMS::data_offset + DebugWriteBufMS::u64s;//!debug
 
     FileReadMS::num_threads = num_physical_streams;
@@ -611,6 +701,8 @@ class FileReadWorker: public MS_Worker<FileReadWorker,FileReadMS,FileBufMS>{
     std::pair<i64,i64> do_work(
         i32 read_indx, i32 write_indx, i64 r_size, i64 buf_read, i64 buf_write,
         i64 read_step, i64 write_step,  bool is_first_child, bool is_last_parent){
+        auto start=timenow();
+        DEBUG_PRINT_MPDBG("FileReadWorker::do_work begin: " << OUT(read_indx, write_indx, r_size, buf_read, buf_write, read_step, write_step, is_first_child, is_last_parent));
         auto& R = MS_r.data[read_indx];
         auto& W = MS_w.data[write_indx];
         i64 total_read = 0;
@@ -621,12 +713,18 @@ class FileReadWorker: public MS_Worker<FileReadWorker,FileReadMS,FileBufMS>{
             throw std::runtime_error("FileReadWorker::do_work: buf_write not aligned to batch size");
         }
         
+        
         BatchFileBufInfo& batch_info = W.batch_info[batch_index];
         batch_info.reset();
         
         while (total_read < r_size && R.current_file < MS_r.files[R.id].filenames.size()) {
             if (R.file == nullptr) {
                 R.file = fopen(MS_r.files[R.id].filenames[R.current_file].c_str(), "rb");
+                #if DEBUG_PRINTOUT
+                auto filename = MS_r.files[R.id].filenames[R.current_file];
+                auto filenameid = R.current_file;
+                DEBUG_PRINT_MPDBG("FileReadWorker::do_work open file: " << OUT(read_indx, write_indx, read_step, write_step, filename, filenameid));
+                #endif
                 if (R.file == nullptr) {//!err
                     PRINT_MPDBG("FileReadWorker::do_work: could not open file " << MS_r.files[R.id].filenames[R.current_file]);
                     R.current_file++;
@@ -653,6 +751,11 @@ class FileReadWorker: public MS_Worker<FileReadWorker,FileReadMS,FileBufMS>{
             total_read += actually_read;
 
             if (ftell(R.file) == MS_r.files[R.id].lengths[R.current_file]) {
+                #if DEBUG_PRINTOUT
+                auto filename = MS_r.files[R.id].filenames[R.current_file];
+                auto filenameid = R.current_file;
+                DEBUG_PRINT_MPDBG("FileReadWorker::do_work close file: " << OUT(read_indx, write_indx, read_step, write_step, filename, filenameid));
+                #endif
                 fclose(R.file);
                 R.file = nullptr;
                 R.current_file++;
@@ -662,6 +765,12 @@ class FileReadWorker: public MS_Worker<FileReadWorker,FileReadMS,FileBufMS>{
                 }
             }
         }
+        #if DEBUG_PRINTOUT
+        auto filetellg = R.file!=nullptr?ftell(R.file):-1;
+        DEBUG_PRINT_MPDBG("FileReadWorker::do_work end: " << OUT(read_indx, write_indx, read_step, write_step, total_read,batch_info.is_last, filetellg));
+        #endif
+        d_reader+=timeinsec(timenow()-start);
+        n_reader++;
         return {total_read, total_read};
     }
 };
@@ -702,6 +811,13 @@ class ParserClass{
     //sets chars[(offset_w+total_write)/chars_per_u64] to curr_u64
     inline void commit_current_u64(){
         write_batch.chars[(offset_w+total_write)/chars_per_u64] = curr_u64;
+    }
+    //!pos does not have automatically offset_w added
+    inline void reload_current_u64(i64 pos){
+        curr_u64 = write_batch.chars[pos/(chars_per_u64)];
+        //only keep chars below offset_w, not inclusive
+        curr_u64 &= bitmask_len((pos % chars_per_u64) * bits_per_char);
+        write_batch.chars[pos/(chars_per_u64)] = curr_u64;
     }
     //moves .seps by 1 u64 and .bits by 1 bit, sets sep to new_pos; bit to is_true_sep  
     //also sets seq_begin to new_pos
@@ -780,8 +896,14 @@ class ParserClass{
         // if(total_write-seq_begin>0){
         //     finish_seq();
         // }
-        if(read_ended!=(W.file_interval+1==read_batch_info.intervals.size())){//!err
-            std::string s=prints_new("ParserClass::finish_interval: read_ended doesn't match last interval, file_interval:",W.file_interval,", intervals.size:",read_batch_info.intervals.size());
+        #if DEBUG_PRINTOUT
+        auto fileid=read_batch_info.intervals[W.file_interval].file_id;
+        auto totalids=read_batch_info.intervals.size();
+        auto id_info=prints_new(fileid,"= (",W.file_interval+1,"/",totalids,")");
+        DEBUG_PRINT_MPDBG("ParserClass::finish_interval: " << OUT(read_ended, write_ended, restored, id_info));
+        #endif
+        if(read_ended&&(W.file_interval+1!=read_batch_info.intervals.size())){//!err
+            std::string s=prints_new("ParserClass::finish_interval: read_ended does not imply last interval: file_interval:",W.file_interval,", intervals.size:",read_batch_info.intervals.size());
             PRINT_MPDBG(s);
             throw std::runtime_error(s);
         }
@@ -804,9 +926,18 @@ class ParserClass{
             W.temp_buffer.clear();
             i64 len=total_write-seq_begin;
             W.num_chars_in_temp=len;
+
+            //!debug
+            // for(i64 i=0; i<write_batch.seps.size()-1; i++){
+            //     PRINT_MPDBG(print_genome_vec_new(write_batch.chars, offset_w+write_batch.seps[i], offset_w+write_batch.seps[i+1]));
+            // }
+            // PRINT_MPDBG(print_genome_vec_new(write_batch.chars, offset_w+write_batch.seps.back(), offset_w+seq_begin));
+            // PRINT_MPDBG(prints_new("undoing:",print_genome_vec_new(write_batch.chars, offset_w+seq_begin, offset_w+total_write)));
+
             if(len>0){
                 W.temp_buffer.resize(ceil_div(len*bits_per_char,64));
-                copy_bitvector(write_batch.chars, W.temp_buffer, offset_w+seq_begin, len*bits_per_char, 0);
+                copy_bitvector(write_batch.chars, W.temp_buffer, (offset_w+seq_begin)*bits_per_char, len*bits_per_char, 0);
+                // PRINT_MPDBG(prints_new("in temp:",print_genome_vec_new(W.temp_buffer, 0, len)));
                 W.temp_file_id=write_batch_info.intervals.back().file_id;
                 total_write=seq_begin;
             }
@@ -826,6 +957,7 @@ class ParserClass{
             if(read_ended&&read_batch_info.is_last){//last interval and last batch
                 final_sep();
                 write_batch_info.is_last=true;
+                DEBUG_PRINT_MPDBG("ParserClass::finish_interval: last interval and last batch");
             }else{//(!read_ended&&!write_ended){//inner, need to start new interval
                 //=having no final_sep, .size() points to the next added sep
                 // write_batch_info.intervals.push_back(
@@ -864,6 +996,8 @@ class FileBufWorker: public MS_Worker<FileBufWorker,FileBufMS,ParseMS>{
     std::pair<i64,i64> do_work(
         i32 read_indx, i32 write_indx, i64 r_size, i64 buf_read, i64 buf_write,
         i64 read_step, i64 write_step,  bool is_first_child, bool is_last_parent){
+        auto start=timenow();
+        DEBUG_PRINT_MPDBG("FileBufWorker::do_work begin: " << OUT(read_indx, write_indx, r_size, buf_read, buf_write, read_step, write_step, is_first_child, is_last_parent));
         //= reading terminates on either R or W end
         auto& R = MS_r.data[read_indx];
         auto& W = MS_w.data[write_indx];
@@ -897,14 +1031,9 @@ class FileBufWorker: public MS_Worker<FileBufWorker,FileBufMS,ParseMS>{
         i64 offset_r = buf_read % FileBufStream::logic_batch_size;
         //current working u64 that is logically at (offset_w+total_write)/chars_per_u64
         //or (offset_w+total_write)*bits_per_char/64
-        u64 curr_u64 = write_batch.chars[offset_w/(chars_per_u64)];
 
-        //only keep chars below offset_w, not inclusive
 
-        curr_u64 &= bitmask_len((offset_w % chars_per_u64) * bits_per_char);
-        write_batch.chars[offset_w/(chars_per_u64)] = curr_u64;
 
-        //max_read_chars*3 to be able to pad at the end + insert stored in temp_buffer directly
         i64 remaining = ParseStream::logic_batch_size - offset_w-max_read_chars*3;
         
         if (remaining <= 0) {//!err
@@ -946,38 +1075,62 @@ class FileBufWorker: public MS_Worker<FileBufWorker,FileBufMS,ParseMS>{
         ParseState state = W.parse_state;
         //inclusive, left, in write
         //used for rollback in case of incomplete read
+
+        u64 curr_u64 = 0;
         i64 seq_begin = 0;
         ParserClass P(offset_w,offset_r,buf_read,
             write_batch,read_batch_info, write_batch_info,
             seq_begin,total_write,curr_u64,
             R,W,state);
 
+        //technically total_write should be 0 here
+        P.reload_current_u64(offset_w+total_write);
+
         //load temp if not empty
         if(W.num_chars_in_temp > 0){
             copy_bitvector(W.temp_buffer,write_batch.chars,
                 0,W.num_chars_in_temp*bits_per_char,offset_w*bits_per_char);
+            // PRINT_MPDBG(prints_new("copied over:",print_genome_vec_new(write_batch.chars, offset_w, offset_w+W.num_chars_in_temp)));//!debug
             total_write+=W.num_chars_in_temp;
-            if(W.temp_file_id!=curr_interval.file_id){
-                //should only happen when new read
-                // if(offset_r!=0){//!err
-                //     std::string s=prints_new("FileBufWorker::do_work: different file_id in temp_buffer while not at start, offset_r:",offset_r,", temp_file_id:",W.temp_file_id,", file_id:",curr_interval.file_id);
-                // }
-                
-                //set in remove_interval_if_empty instead
-                //     write_batch_info.intervals.back().end=write_batch.seps.size(); 
-                if(write_batch_info.intervals.size()==0){
-                    //means also new write
-                    P.add_interval(0, 0, W.temp_file_id);
-                }else if(write_batch_info.intervals.back().file_id!=W.temp_file_id){//!err
-                    std::string s=prints_new("FileBufWorker::do_work: different file_id in temp_buffer, file_id:",write_batch_info.intervals.back().file_id,", temp_file_id:",W.temp_file_id);
+
+            //!forgot to load new curr_u64 previously
+            P.reload_current_u64(offset_w+total_write);
+
+            if(write_batch_info.intervals.size()==0){
+                //means also new write
+                if(offset_w!=0){//!err
+                    std::string s=prints_new("FileBufWorker::do_work: different file_id in temp_buffer while not at start, offset_w:",offset_w,", temp_file_id:",W.temp_file_id,", file_id:",curr_interval.file_id);
                     PRINT_MPDBG(s);
                     throw std::runtime_error(s);
                 }
+                P.add_interval(0, 0, W.temp_file_id);
+            }else if(write_batch_info.intervals.back().file_id!=W.temp_file_id){//!err
+                std::string s=prints_new("FileBufWorker::do_work: different file_id in temp_buffer, file_id:",write_batch_info.intervals.back().file_id,", temp_file_id:",W.temp_file_id);
+                PRINT_MPDBG(s);
+                throw std::runtime_error(s);
+            }
+
+            if(W.temp_file_id!=curr_interval.file_id){
                 P.finish_interval(false,false,true);
             }
             //no need to set state here, it is done earlier and is overwritten if file_ids differ
             W.num_chars_in_temp=0;
+        }else if (offset_w == 0) {
+            if (write_batch_info.intervals.size() != 0){//sanity
+                std::string s=prints_new("FileBufWorker::do_work: write_batch_info.intervals.size()!=0 with 0 offset_w:",write_batch_info.intervals.size());
+                PRINT_MPDBG(s);
+                throw std::runtime_error(s);
+            }
+            P.add_interval(0, 0, curr_interval.file_id);//must add interval if new write
+        }else{
+            if (write_batch_info.intervals.size() == 0){//sanity
+                std::string s=prints_new("FileBufWorker::do_work: write_batch_info.intervals.size()==0 with non-zero offset_w:",write_batch_info.intervals.size(),", offset_w:",offset_w);
+                PRINT_MPDBG(s);
+                throw std::runtime_error(s);
+            }
         }
+
+
         bool read_ended=false;
         bool write_ended=false;
         while (total_read<remaining_read
@@ -1005,22 +1158,30 @@ class FileBufWorker: public MS_Worker<FileBufWorker,FileBufMS,ParseMS>{
                     if(state==BEGIN_FROM_READ){
                         P.finish_seq();
                     }
-                    state=SKIP;
+                    state=SKIP_THEN_SKIP;//necessary instead of SKIP because next quality line can have @
                 }else if(P.is_newline(c)){
                     //do nothing, state does not change, empty lines ignored
                 }else if(state==BEGIN_FROM_NEW_READ||state==BEGIN_FROM_READ){
                     state=READ;
                     P.add_char(c);
+                    // if(write_step==1){
+                    //     std::cout<<c;
+                    // }
                 }else{//begin from skip
                     state=SKIP;
                 }
-            }else if(state==SKIP||state==SKIP_THEN_READ){
+            }else if(state==SKIP||state==SKIP_THEN_READ||state==SKIP_THEN_SKIP||state==SKIP_UNTIL_CHAR){
                 if(P.is_newline(c)){
                     if(state==SKIP){
                         state=BEGIN_FROM_SKIP;
-                    }else{
+                    }else if(state==SKIP_THEN_READ){
                         state=BEGIN_FROM_NEW_READ;
+                    }else if(state==SKIP_THEN_SKIP){
+                        state=SKIP_UNTIL_CHAR;
+                    }else{//SKIP_UNTIL_CHAR
                     }
+                }else if(state==SKIP_UNTIL_CHAR){
+                    state=SKIP;
                 }
             }else{//READ
                 if(P.is_newline(c)){
@@ -1028,6 +1189,9 @@ class FileBufWorker: public MS_Worker<FileBufWorker,FileBufMS,ParseMS>{
                 }else{
                     P.add_char(c);
                 }
+                // if(write_step==1){
+                //     std::cout<<c;
+                // }
             }
             total_read++;
         }
@@ -1064,14 +1228,20 @@ class FileBufWorker: public MS_Worker<FileBufWorker,FileBufMS,ParseMS>{
                 throw std::runtime_error(s);
             }
             //align total_write to batch size
-            total_write=ParseStream::logic_batch_size-(offset_r);
-            if((total_write+buf_read)%FileBufStream::logic_batch_size!=0){//!err
-                std::string s=prints_new("FileBufWorker::do_work: total_write not aligned to batch size, total_write:",total_write,", buf_read:",buf_read);
+            total_write=ParseStream::logic_batch_size-(offset_w);
+            if((total_write+buf_write)%FileBufStream::logic_batch_size!=0){//!err
+                std::string s=prints_new("FileBufWorker::do_work: total_write not aligned to batch size, total_write:",total_write,", buf_write:",buf_write);
                 PRINT_MPDBG(s);
                 throw std::runtime_error(s);
             }
         }
+        if(write_batch_info.is_last){//!set ended in R
+            R.ended=true; 
+        }
         W.parse_state=state;
+        DEBUG_PRINT_MPDBG("FileBufWorker::do_work end: " << OUT(read_indx, write_indx, read_step, write_step, total_read, total_write,write_batch_info.is_last));
+        d_parser+=timeinsec(timenow()-start);
+        n_parser++;
         return {total_read, total_write};
     }
 };
@@ -1082,6 +1252,8 @@ class DebugParseWorker: public MS_Worker<DebugParseWorker,ParseMS,DebugWriteBufM
     std::pair<i64,i64> do_work(
         i32 read_indx, i32 write_indx, i64 r_size, i64 buf_read, i64 buf_write,
         i64 read_step, i64 write_step,  bool is_first_child, bool is_last_parent){
+        auto start=timenow();
+        DEBUG_PRINT_MPDBG("DebugParseWorker::do_work begin: " << OUT(read_indx, write_indx, r_size, buf_read, buf_write, read_step, write_step, is_first_child, is_last_parent));
         //= reading terminates on either R or W end
         auto& R = MS_r.data[read_indx];
         auto& W = MS_w.data[write_indx];
@@ -1093,7 +1265,7 @@ class DebugParseWorker: public MS_Worker<DebugParseWorker,ParseMS,DebugWriteBufM
         i64 write_batch_index = buf_write / DebugWriteBufStream::logic_batch_size;
 
         BatchFileInfo& read_batch_info = R.batch_info[read_batch_index];
-        ParseVectorBatch& read_batch = R.batches[write_batch_index];
+        ParseVectorBatch& read_batch = R.batches[read_batch_index];
 
         BatchFileBufInfo& write_batch_info = W.batch_info[write_batch_index];
 
@@ -1150,6 +1322,9 @@ class DebugParseWorker: public MS_Worker<DebugParseWorker,ParseMS,DebugWriteBufM
             }
             write_batch_info.intervals.back().end=total_write;
         }
+        DEBUG_PRINT_MPDBG("DebugParseWorker::do_work end: " << OUT(read_indx, write_indx, read_step, write_step, total_read, total_write,write_batch_info.is_last));
+        d_decoder+=timeinsec(timenow()-start);
+        n_decoder++;
         return {r_size, DebugWriteBufStream::logic_batch_size};
     }
 };
@@ -1160,6 +1335,8 @@ class DebugWriteBufWorker: public MS_Worker<DebugWriteBufWorker,DebugWriteBufMS,
     std::pair<i64,i64> do_work(
         i32 read_indx, i32 write_indx, i64 r_size, i64 buf_read, i64 buf_write,
         i64 read_step, i64 write_step,  bool is_first_child, bool is_last_parent){
+        auto start=timenow();
+        DEBUG_PRINT_MPDBG("DebugWriteBufWorker::do_work begin: " << OUT(read_indx, write_indx, r_size, buf_read, buf_write, read_step, write_step, is_first_child, is_last_parent));
         //= reading terminates on either R or W end
         auto& R = MS_r.data[read_indx];
         auto& W = MS_w.data[write_indx];
@@ -1194,6 +1371,7 @@ class DebugWriteBufWorker: public MS_Worker<DebugWriteBufWorker,DebugWriteBufMS,
             FileInterval& curr_interval=read_batch_info.intervals[i];
             if(fileid!=curr_interval.file_id){
                 if(file!=nullptr){
+                    DEBUG_PRINT_MPDBG("DebugWriteBufWorker::do_work close file: " << OUT(read_indx, write_indx, read_step, write_step, fileid));
                     fclose(file);
                 }
                 if(MS_w.files[W.id].output_filenames.size()<=curr_interval.file_id){//!err
@@ -1208,6 +1386,7 @@ class DebugWriteBufWorker: public MS_Worker<DebugWriteBufWorker,DebugWriteBufMS,
                     throw std::runtime_error(s);
                 }
                 fileid=curr_interval.file_id;
+                DEBUG_PRINT_MPDBG("DebugWriteBufWorker::do_work open file: " << OUT(read_indx, write_indx, read_step, write_step, fileid));
             }
             //copy the entire range at once
             u8* data=R.stream_data.data()+buf_read+curr_interval.start;
@@ -1222,8 +1401,13 @@ class DebugWriteBufWorker: public MS_Worker<DebugWriteBufWorker,DebugWriteBufMS,
         if(read_batch_info.is_last){
             if(file!=nullptr){
                 fclose(file);
+                DEBUG_PRINT_MPDBG("DebugWriteBufWorker::do_work close file: " << OUT(read_indx, write_indx, read_step, write_step, fileid));
             }
+            R.ended=true;
         }
+        DEBUG_PRINT_MPDBG("DebugWriteBufWorker::do_work end: " << OUT(read_indx, write_indx, read_step, write_step, total_read));
+        d_writer+=timeinsec(timenow()-start);
+        n_writer++;
         return {r_size, FileOutStream::logic_batch_size};
     }
 };

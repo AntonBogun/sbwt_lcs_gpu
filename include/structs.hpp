@@ -34,12 +34,12 @@ struct InvalidCharsInterval{
 struct BatchFileBufInfo{
     std::vector<FileInterval> intervals;
     // std::vector<i64> fileIds;
+    bool is_last;
     void reset(){
         intervals.clear();
         // fileIds.clear();
         is_last = false;
     }
-    bool is_last;
 };
 struct BatchFileInfo{
     std::vector<FileSepInterval> intervals;
@@ -65,10 +65,10 @@ struct ParseVectorBatch{
     i64 num_packed_chars=0;
     void reset(){
         num_packed_chars = 0;
-        chars.clear();
+        // chars.clear();//!does not clear because just overwrites
         seps.clear();
         bits.clear();
-        rank.clear();
+        // rank.clear();//!does not clear because just overwrites
     }
 };
 struct GPUThreadLookupTableEntry{

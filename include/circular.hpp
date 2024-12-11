@@ -81,7 +81,8 @@ enum BufStepType{
     E0_buf
 };
 
-//Circular Buffer _data
+//base of circular buffer _data classes
+//*has a well behaving constructor, nothing has to be initialized after construction
 template<typename impl>
 struct CB_data{
     bool valid=false;//if false, unallocated
@@ -120,6 +121,7 @@ struct CB_data{
     //!Note: for !has_write, size has to be at least size_max_read*max_readers
     //!- and for !has_read,  size has to be at least size_max_write*max_writers
     //similarly for SEQUENTIAL for obvious reasons
+    //!NOTE: size must be >0 even on no-read streams otherwise step will perform mod by 0
 
     //circular buffer structure:
     //[ -> to be written ... (S) being read ... (S0) to be read ... (E) being written ... (E0) to be written ... -> ]
@@ -136,6 +138,7 @@ struct CB_data{
     //<step, cv_index>
     std::priority_queue<std::pair<i64,i32>, std::vector<std::pair<i64,i32>>, CompareFirst> S_id_heap;//wait for (S==step)
     std::priority_queue<std::pair<i64,i32>, std::vector<std::pair<i64,i32>>, CompareFirst> E_id_heap;//wait for (E==step)
+    //*well behaving constructor
     CB_data(i64 _size, i32 _max_writers, i32 _max_readers):
         size(_size), v_w(_size), max_writers(_max_writers), max_readers(_max_readers){}
     ////impl constructor should set id, valid=true
@@ -176,6 +179,12 @@ struct CB_data{
     CB_data& operator=(const CB_data&)=delete;
     CB_data& operator=(CB_data&&)=delete;
 };
+
+//base of circular buffer multistream classes
+//~ does not have initialize_base within constructor, or it would have initialization order issues
+//! Note: initialize_base must be called after construction (best within derived constructor); no checks are done to ensure this
+//! Similarly, setup_connections must be called outside even the derived constructor to connect pointers to parent/child multistreams
+//~ Note: many functions must be implemented in the derived class
 template<typename impl,typename data_impl>
 class SharedThreadMultistream {
     public:
@@ -229,8 +238,13 @@ class SharedThreadMultistream {
 
 
     //init data, self_hint, id_map, cvs, q, write_chunk_size
+    //~does not have initialize_base within constructor, or it would have initialization order issues
     SharedThreadMultistream(i64 stream_size, i32 num_streams, i32 max_readers, i32 max_writers,
-        i32 max_readers_per_stream, i32 max_writers_per_stream): data(num_streams), self_hint(num_streams), id_map(num_streams), cvs(max_readers+max_writers){
+        i32 max_readers_per_stream, i32 max_writers_per_stream): 
+        data(num_streams), self_hint(num_streams), id_map(num_streams), cvs(max_readers+max_writers){}
+    //!initialize_base must be called after constructions; no checks are done to ensure this
+    void initialize_base(i64 stream_size, i32 num_streams, i32 max_readers, i32 max_writers,
+        i32 max_readers_per_stream, i32 max_writers_per_stream){
         for(i32 i=0; i<num_streams; i++){
             // data.emplace_back(stream_size, max_writers_per_stream, max_readers_per_stream, write_chunk_size);
             static_cast<impl*>(this)->emplace_back_data(stream_size, max_writers_per_stream, max_readers_per_stream);
@@ -510,6 +524,7 @@ static_assert(
 //Todo (potential features): give can_allocate(?) and allocate current parent(?) (maybe only for !has_read?) 
 //- stream slots to avoid the child stream starvation problem
 //! final on the hint doesn't seem to do anything
+//*has a well behaving constructor, nothing has to be initialized after construction
 template<typename impl, typename read_ms_impl, typename write_ms_impl>
 class MS_Worker {//MultiStream_Worker
     public:
@@ -547,7 +562,7 @@ class MS_Worker {//MultiStream_Worker
             //(allocate read buffer?) + grab read buffer
             // bool allocating=false;//redundant due to first_child
             S0_result res=S0_result::EXIT;//will be changed
-            {
+            {//= try to begin read allocation 
                 std::unique_lock<std::mutex> lock(MS_r.m);
                 //WAIT_CONDITION
                 auto cond=[
@@ -651,7 +666,7 @@ class MS_Worker {//MultiStream_Worker
                     return false;
                 };
                 if constexpr(single_thread){
-                    if(cond()){
+                    if(!cond()){
                         lock.unlock();
                         return false;
                     }
@@ -752,8 +767,7 @@ class MS_Worker {//MultiStream_Worker
             bool new_alloc_hint=false;
             bool update_id_map=false;
             std::pair<bool,bool> new_hint={false,false};
-            //(allocate write buffer) + grab write buffer
-            {
+            {//=(allocate write buffer) + grab write buffer
                 std::unique_lock<std::mutex> lock(MS_w.m);
                 do{
                     if(first_child){
@@ -844,7 +858,7 @@ class MS_Worker {//MultiStream_Worker
                     failed_reservation=false;
                 }while(0);
             }
-            {
+            {//=confirm or cancel read allocation 
                 std::unique_lock<std::mutex> lock(MS_r.m);
                 auto& B_r=MS_r.data[indx];
                 if(failed_reservation){
@@ -940,15 +954,17 @@ class MS_Worker {//MultiStream_Worker
                 if constexpr(MS_r.has_write){
                     if(B_r.v_r<size_max_read && !B_r.final) throw std::runtime_error("Not enough read space when expecting");
                     r_size=min(B_r.v_r, size_max_read);
-                    if(B_r.v_r==r_size && B_r.final){
-                        // if constexpr(MS_r.debug_bool){//!debug
-                        //     std::stringstream ss;
-                        //     ss<<debug_str<<" set_last_parent "<<indx<<" id "<<id<<" res,v_r,final "<<S0_result_str(res)<<","<<B_r.v_r<<","<<B_r.final;
-                        //     syncprint(ss.str());
-                        // }
-                        // syncprint(debug_str <<" : last_parent SET, id=" << id);
-                        last_parent=true;
-                        B_r.state=ENDED;//need to prevent further reads
+                    if constexpr(MS_r.stream_type==PARALLEL){//~error happened because B_r.state was set to ENDED in sequential
+                        if(B_r.v_r==r_size && B_r.final){
+                            // if constexpr(MS_r.debug_bool){//!debug
+                            //     std::stringstream ss;
+                            //     ss<<debug_str<<" set_last_parent "<<indx<<" id "<<id<<" res,v_r,final "<<S0_result_str(res)<<","<<B_r.v_r<<","<<B_r.final;
+                            //     syncprint(ss.str());
+                            // }
+                            // syncprint(debug_str <<" : last_parent SET, id=" << id);
+                            last_parent=true;
+                            B_r.state=ENDED;//need to prevent further reads
+                        }
                     }
                 }else{
                     r_size=size_max_read;//!assumes that buffer size is at least size_max_read*max_readers
@@ -982,7 +998,7 @@ class MS_Worker {//MultiStream_Worker
                 //     syncprint(ss.str());
                 // }
             }
-            //do work
+            //=do work
             //! if(r_size>0) //may lead to edge cases, add a throw into the do_work manually
             std::pair<i64,i64> consumed=static_cast<impl*>(this)->do_work(indx, write_indx, r_size, buf_S0, buf_E0,  step, write_step, first_child, last_parent);
             //!debug profile//
@@ -999,7 +1015,7 @@ class MS_Worker {//MultiStream_Worker
             update_id_map=false;
             new_alloc_hint=false;
             new_hint={false,false};
-            {
+            {//=handle read release
                 std::unique_lock<std::mutex> lock(MS_r.m);
                 //WAIT_CONDITION
                 MS_r.template add_wait<S>(lock, indx, step, [this,indx,step](){
@@ -1094,9 +1110,9 @@ class MS_Worker {//MultiStream_Worker
                 parent_exit=MS_r.parent_exit;
                 // if(MS_r.exit) about_to_exit=true;
             }
-            if constexpr(MS_r.has_write){
+            if constexpr(MS_r.has_write){//= update parent of read id_map -> read deallocation -> parent of read hint update
                 if(update_id_map){//dealloc
-                    if(!parent_exit){
+                    if(!parent_exit){//=update parent of read id_map -> read deallocation 
                         if(MS_r.parent_m==nullptr) throw std::runtime_error("No parent_m");
                         std::unique_lock<std::mutex> lock(*MS_r.parent_m);
                         i32 i=0;
@@ -1125,7 +1141,7 @@ class MS_Worker {//MultiStream_Worker
                         }
                         // MS_r.parent_cv_S0->notify_one();//since v_w changed
                     }
-                    {
+                    {//= parent of read hint update
                         std::unique_lock<std::mutex> lock(MS_r.m);
                         MS_r.deallocate(indx);//!has to be done after updating the id_map
                         if(MS_r.parent_exit){
@@ -1146,7 +1162,7 @@ class MS_Worker {//MultiStream_Worker
                     }
                 }
 
-                if(!parent_exit){
+                if(!parent_exit){//=parent of read hint update
                     if(MS_r.parent_m==nullptr) throw std::runtime_error("No parent_m");
                     if(new_alloc_hint || (new_hint.first && new_hint.second)){
                         //will always be reached if id_map is updated
@@ -1166,11 +1182,11 @@ class MS_Worker {//MultiStream_Worker
                     }
                 }
             }
-            //!write mostly a copy of read
+            //!write below is mostly a copy of read
             update_id_map=false;
             new_alloc_hint=false;
             new_hint={false,false};
-            {
+            {//= handle write release
                 std::unique_lock<std::mutex> lock(MS_w.m);
                 //WAIT_CONDITION
                 MS_w.template add_wait<E>(lock, write_indx, write_step, [this,write_indx,write_step](){
@@ -1227,7 +1243,7 @@ class MS_Worker {//MultiStream_Worker
                 MS_w.template notify<E>(write_indx);//since E changed
                 MS_w.cv_S0.notify_one();//since v_r changed
             }
-            if constexpr(!MS_w.has_read){
+            if constexpr(!MS_w.has_read){//= handle read id_map update and write deallocation
                 if(update_id_map){
                     if(!about_to_exit){
                         std::unique_lock<std::mutex> lock(MS_r.m);
@@ -1268,7 +1284,7 @@ class MS_Worker {//MultiStream_Worker
                     }
                 }
             }
-            if(!about_to_exit){
+            if(!about_to_exit){//= handle read hint update
                 if(new_alloc_hint || ((!MS_w.has_read || new_hint.first) && new_hint.second)){
                     std::unique_lock<std::mutex> lock(MS_r.m);
                     auto& hint=MS_w.self_hint[write_indx];

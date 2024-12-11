@@ -223,6 +223,7 @@ const u64 gpu_warp_size = 32;//NVIDIA, 64 for AMD
 const u64 max_files_in_stream = 100;
 //desired core data batch size (e.g. chars or 2 bit chars)
 const u64 batch_buf_bytes = (1<<20);//1MB
+// const u64 batch_buf_bytes = (1<<11);//1MB//!debug
 const u64 batch_buf_u64s = ceil_div_const(batch_buf_bytes, sizeof(u64));
 // static_assert((batch_buf_size % sizeof(u64) == 0), "batch_buf_size must be a multiple of sizeof(u64)");
 
@@ -375,7 +376,12 @@ class ContinuousVector: public V_type {
 };
 
 
+enum OffsetVectorOpts{
+    DEFAULT,
+    SET_MAX_SIZE
+};
 //non-owning vector
+//!Note: always sets size to 0 unless constructed from rvalue of another vector
 template <typename T> class OffsetVector { // Fixed Capacity Vector
     static_assert(std::is_trivially_copyable_v<T>,"OffsetVector T must be trivially copyable");
     static_assert(std::is_standard_layout_v<T>, "OffsetVector T must be standard layout");
@@ -383,8 +389,12 @@ template <typename T> class OffsetVector { // Fixed Capacity Vector
     T* ptr_;
     u64 max_cap_;
     u64 size_;
-    const u64 in_v_off_;
+    const u64 in_v_off_;//within the input vector
   public:
+//   enum ConstructOptions{//~gave up on this
+//     DEFAULT,
+//     SET_MAX_SIZE,
+//   }
 
     using value_type = T;
 
@@ -404,6 +414,7 @@ template <typename T> class OffsetVector { // Fixed Capacity Vector
         static_assert(std::is_trivially_copyable_v<typename V_type::value_type>,"OffsetVector V_type::value_type must be trivially copyable");
         static_assert(std::is_standard_layout_v<typename V_type::value_type>, "OffsetVector V_type::value_type must be standard layout");
     }
+    // template <ConstructOptions opt=DEFAULT,typename V_type>//~gave up
     template <typename V_type>
     explicit OffsetVector(V_type &v) :
     max_cap_(v.size()*sizeof(typename V_type::value_type)/sizeof(T)),
@@ -412,16 +423,39 @@ template <typename T> class OffsetVector { // Fixed Capacity Vector
     in_v_off_(0) {
         assert_compatible<V_type>();
     }
+    template <typename V_type>
+    explicit OffsetVector(V_type &v, const OffsetVectorOpts opt) :
+    max_cap_(v.size()*sizeof(typename V_type::value_type)/sizeof(T)),
+    size_(opt==SET_MAX_SIZE?v.size()*sizeof(typename V_type::value_type)/sizeof(T):0),
+    ptr_(reinterpret_cast<T*>(v.data())),
+    in_v_off_(0) {
+        assert_compatible<V_type>();
+    }
 
+    // template <ConstructOptions opt=DEFAULT,typename V_type>//~gave up
     template <typename V_type>
     explicit OffsetVector(V_type &in_v, u64 in_v_off, u64 in_v_cap) :
     max_cap_(in_v_cap*sizeof(typename V_type::value_type)/sizeof(T)),
+    // size_(opt==SET_MAX_SIZE?in_v_cap:0),
     size_(0),
     ptr_(reinterpret_cast<T*>(in_v.data()+in_v_off)),
     in_v_off_(in_v_off) {
         assert_compatible<V_type>();
-        if (in_v_off + max_cap_ > in_v.size()){
-            throw std::out_of_range("OffsetVector: offset + max_cap_ out of range: "+std::to_string(in_v_off)+" + "+std::to_string(max_cap_)+" > "+std::to_string(in_v.size()));
+        if (in_v_off + in_v_cap > in_v.size()){
+            throw std::out_of_range("OffsetVector: offset + in_v_cap out of range: "+std::to_string(in_v_off)+" + "+std::to_string(in_v_cap)+" > "+std::to_string(in_v.size()));
+        }
+    }
+        // template <ConstructOptions opt=DEFAULT,typename V_type>//~gave up
+    template <typename V_type>
+    explicit OffsetVector(V_type &in_v, u64 in_v_off, u64 in_v_cap, const OffsetVectorOpts opt) :
+    max_cap_(in_v_cap*sizeof(typename V_type::value_type)/sizeof(T)),
+    // size_(opt==SET_MAX_SIZE?in_v_cap:0),
+    size_(opt==SET_MAX_SIZE?in_v_cap*sizeof(typename V_type::value_type)/sizeof(T):0),
+    ptr_(reinterpret_cast<T*>(in_v.data()+in_v_off)),
+    in_v_off_(in_v_off) {
+        assert_compatible<V_type>();
+        if (in_v_off + in_v_cap > in_v.size()){
+            throw std::out_of_range("OffsetVector: offset + in_v_cap out of range: "+std::to_string(in_v_off)+" + "+std::to_string(in_v_cap)+" > "+std::to_string(in_v.size()));
         }
     }
     // explicit OffsetVector(u64 cap, T* ptr) : max_cap_(cap), size_(0), ptr_(ptr) {
@@ -500,6 +534,12 @@ template <typename T> class OffsetVector { // Fixed Capacity Vector
     inline T *data() { return ptr_; }
     inline const T *data() const { return ptr_; }
 };
+// template <typename T, typename V_type> 
+// OffsetVector<T> full_offset_vector(V_type &in_v, u64 in_v_off, u64 in_v_cap){
+//     OffsetVector<T> temp(in_v, in_v_off, in_v_cap);
+//     temp.resize(in_v_cap);
+//     return temp;
+// }
 
 template <typename V>
 inline i32 find_map(const V& map, i64 id){
@@ -574,6 +614,15 @@ std::string print_vec_new(V& vec){
         }
     }
     ss<<"]";
+    return ss.str();
+}
+template <typename V>
+std::string print_genome_vec_new(V& vec, int from, int to){
+    std::stringstream ss;
+    ss<<"["<<from<<","<<to<<"): ";
+    for(i32 i=from; i<to; i++){
+        ss<<alphabet_to_char(static_cast<Alphabet>(access_alphabet_val(vec, i)));
+    }
     return ss.str();
 }
 

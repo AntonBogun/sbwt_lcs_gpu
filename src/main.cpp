@@ -39,8 +39,24 @@ namespace sbwt_lcs_gpu {
     i32 DebugWriteBufMS::num_threads = 0;
     i32 total_threads = 0;
     i32 k=0;
+
+    std::chrono::duration<double> d_reader(0);
+    std::chrono::duration<double> d_parser(0);
+    std::chrono::duration<double> d_decoder(0);
+    std::chrono::duration<double> d_writer(0);
+    i64 n_reader(0);
+    i64 n_parser(0);
+    i64 n_decoder(0);
+    i64 n_writer(0);
 }//namespace sbwt_lcs_gpu
 using namespace sbwt_lcs_gpu;
+
+std::chrono::duration<double> d_reader_total(0);
+std::chrono::duration<double> d_parser_total(0);
+std::chrono::duration<double> d_decoder_total(0);
+std::chrono::duration<double> d_writer_total(0);
+
+
 
 std::tuple<float, int, std::string> bytesToHumanReadable(uint64_t bytes) {
     const char* units[] = {"B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"};
@@ -135,10 +151,10 @@ std::string formatAllSections() {
     // });
     
     oss << formatSection("DebugWriteBufSection", {
-        {"batch_u64s", WriteBufStream::batch_u64s},
-        {"stream_u64s", WriteBufStream::u64s},
-        {"u64s", WriteBufMS::u64s},
-        {"offset",WriteBufMS::data_offset}
+        {"batch_u64s", DebugWriteBufStream::batch_u64s},
+        {"stream_u64s", DebugWriteBufStream::u64s},
+        {"u64s", DebugWriteBufMS::u64s},
+        {"offset",DebugWriteBufMS::data_offset}
     });
     // u64 total_no_gpu = FileBufMS::u64s + ParseMS::u64s + MultiplexMS::u64s + DemultiplexMS::u64s + WriteBufMS::u64s;
     oss << formatSection("Total", {
@@ -404,8 +420,9 @@ int main(int argc, char *argv[]) {
     u64 num_bits = sbwt_cpu.get_num_bits();
 
     // i64 num_cpu_threads = std::string(std::getenv("NUM_CPU_THREADS")).empty() ? std::thread::hardware_concurrency() : std::stoi(std::getenv("NUM_CPU_THREADS"));
-    // i64 thread_concurrency=std::thread::hardware_concurrency();
+    i64 thread_concurrency=std::thread::hardware_concurrency();
     i64 num_cpu_threads=1;
+    i64 slurm_env_num_threads=std::getenv("SLURM_CPUS_PER_TASK")==nullptr ? 0 : std::stoi(std::getenv("SLURM_CPUS_PER_TASK"));
     #pragma omp parallel
     {
         #pragma omp single
@@ -413,7 +430,7 @@ int main(int argc, char *argv[]) {
             num_cpu_threads = omp_get_num_threads();
         }
     }
-    // std::cout << "thread_concurrency: " << thread_concurrency << std::endl;
+    std::cout << "thread_concurrency: " << thread_concurrency << std::endl;
 
     //print slurm variables
     // const char* slurm_cpus_per_task = std::getenv("SLURM_CPUS_PER_TASK");
@@ -475,6 +492,8 @@ int main(int argc, char *argv[]) {
     }
 
     std::cout << "threads available: " << num_cpu_threads << std::endl;
+    std::cout << "thread concurrency: " << thread_concurrency << std::endl;
+    std::cout << "slurm threads: " << slurm_env_num_threads << std::endl;
     std::cout << "total threads: " << total_threads << std::endl;
 
     // FileReadWorker gen_MS(stream_sizes[0], num_streams[0],   max_readers[0], max_writers[0],  max_readers_per_stream[0], max_writers_per_stream[0],  write_chunk_sizes[0], n);
@@ -499,7 +518,7 @@ int main(int argc, char *argv[]) {
     FileBufWorker file_buf_worker(file_buf_MS, parse_MS);
     DebugParseWorker debug_parse_worker(parse_MS, debug_write_buf_MS);
     DebugWriteBufWorker debug_write_buf_worker(debug_write_buf_MS, file_out_MS);
-
+    auto total_start = timenow();
     auto worker_loop=[&](){
         bool file_read_finished = false;
         bool file_buf_finished = false;
@@ -507,22 +526,45 @@ int main(int argc, char *argv[]) {
         bool debug_write_buf_finished = false;
         while(true){
             if(!file_read_finished){
+                auto start = timenow();
                 file_read_finished=file_read_worker.run_single();
+                d_reader_total += timeinsec(timenow()-start);
             }
             if(!file_buf_finished){
+                auto start = timenow();
                 file_buf_finished=file_buf_worker.run_single();
+                d_parser_total += timeinsec(timenow()-start);
             }
             if(!debug_parse_finished){
+                auto start = timenow();
                 debug_parse_finished=debug_parse_worker.run_single();
+                d_decoder_total += timeinsec(timenow()-start);
             }
             if(!debug_write_buf_finished){
+                auto start = timenow();
                 debug_write_buf_finished=debug_write_buf_worker.run_single();
+                d_writer_total += timeinsec(timenow()-start);
             }
             if(file_read_finished && file_buf_finished && debug_parse_finished && debug_write_buf_finished){
                 break;
             }
         }
     };
+    worker_loop();
+    auto total_end = timenow();
+    auto reader_mean=d_reader.count()/n_reader;
+    auto parser_mean=d_parser.count()/n_parser;
+    auto decoder_mean=d_decoder.count()/n_decoder;
+    auto writer_mean=d_writer.count()/n_writer;
+    auto reader_ratio=d_reader.count()/d_reader_total.count();
+    auto parser_ratio=d_parser.count()/d_parser_total.count();
+    auto decoder_ratio=d_decoder.count()/d_decoder_total.count();
+    auto writer_ratio=d_writer.count()/d_writer_total.count();
+    std::cout<<prints_new("reader: ",d_reader.count(),"s, num:",n_reader," total: ",d_reader_total.count(),"s, mean: ",reader_mean,"s, ratio: ",reader_ratio)<<std::endl;
+    std::cout<<prints_new("parser: ",d_parser.count(),"s, num:",n_parser," total: ",d_parser_total.count(),"s, mean: ",parser_mean,"s, ratio: ",parser_ratio)<<std::endl;
+    std::cout<<prints_new("decoder: ",d_decoder.count(),"s, num:",n_decoder," total: ",d_decoder_total.count(),"s, mean: ",decoder_mean,"s, ratio: ",decoder_ratio)<<std::endl;
+    std::cout<<prints_new("writer: ",d_writer.count(),"s, num:",n_writer," total: ",d_writer_total.count(),"s, mean: ",writer_mean,"s, ratio: ",writer_ratio)<<std::endl;
+    std::cout<<prints_new("total: ",timeinsec(total_end-total_start).count(),"s")<<std::endl;
 
     // uint64_t size = static_cast<uint64_t>(2) * 1024 * 1024 * 1024 / sizeof(uint64_t);
     // std::vector<uint64_t> array(size);

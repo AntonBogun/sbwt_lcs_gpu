@@ -6,9 +6,9 @@ cd build || { echo "cd failed" && exit 1; }
 #march native for local optimization
 cmake \
   -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DENABLE_PROFILING=ON \
-  -DENABLE_MARCH_NATIVE=ON \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DENABLE_PROFILING=OFF \
+  -DENABLE_MARCH_NATIVE=OFF \
   ..
 if [ $? -ne 0 ]; then >&2 echo "Cmake generation failed" && cd .. && exit 1; fi
 cmake --build . -j8

@@ -64,8 +64,18 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
   set(CXX_FILESYSTEM_LIBRARIES "stdc++fs")
 endif()
 
+if(CMAKE_BUILD_TYPE MATCHES Debug)
+  add_compile_options(-g -gdwarf-4)
+  add_definitions(-DDEBUG)
+  #print that using debug flags
+  message(STATUS "Using debug flags")
 
-
+elseif(CMAKE_BUILD_TYPE MATCHES Release)
+  add_compile_options(-O3)
+  add_definitions(-DNDEBUG)
+  #print that using release flags
+  message(STATUS "Using release flags")
+endif()
 
 # set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 # set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
@@ -158,6 +168,18 @@ target_link_libraries(sbwt_lcs_gpu PRIVATE
   # kmc_tools
   # kmc_core)
   )
+#set debug flags
+
+
+
+
+# if(CMAKE_BUILD_TYPE MATCHES Release)
+#   add_compile_options(/O1)
+# endif()
+
+# if(CMAKE_BUILD_TYPE MATCHES Debug)
+#   add_compile_options(/W4 )
+# endif()
 
 ## Build tests if doing a Debug build
 # if (BUILD_TESTS)

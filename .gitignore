@@ -4,5 +4,8 @@ out_data
 old_files
 out.txt
 err.txt
+log.txt
 build_out.log
 temp
+callgrind.out.*
+gmon.out
