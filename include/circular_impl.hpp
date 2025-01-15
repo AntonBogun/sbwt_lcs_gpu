@@ -827,7 +827,7 @@ class ParserClass{
         }
         set_bitvector_bit(write_batch.bits, write_batch.seps.size(), is_true_sep);
         write_batch.seps.push_back(offset_w + seq_begin);
-        W.total_kmers += new_pos - seq_begin - is_true_sep*W.k_;
+        W.total_kmers += new_pos - seq_begin - is_true_sep*(W.k_-1);
         seq_begin = new_pos;
     }
     void final_sep(){
@@ -1222,7 +1222,7 @@ class FileBufWorker: public MS_Worker<FileBufWorker,FileBufMS,ParseMS>{
             }
             poppy.build(write_batch.bits,write_batch.seps.size());
             //~sanity
-            if((write_batch.seps.back()-(poppy.total_1s)*k)!=W.total_kmers){//!err
+            if((write_batch.seps.back()-(poppy.total_1s)*(k-1))!=W.total_kmers){//!err
                 std::string s=prints_new("FileBufWorker::do_work: total_kmers does not match rank, total_kmers:",W.total_kmers,", rank:",poppy.total_1s,", k:",k,", seps.back:",write_batch.seps.back(),", total:",write_batch.seps.back()-(poppy.total_1s)*k);
                 PRINT_MPDBG(s);
                 throw std::runtime_error(s);

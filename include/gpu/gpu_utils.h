@@ -125,4 +125,15 @@ class GpuEvent {
     void sync();
 };
 
+inline bool gpu_get_bitvector_bit(const u64 *const bitvector, u64 bit) {
+    return (bitvector[bit / 64] >> (bit % 64)) & 1;
+}
+inline bool gpu_get_two_bit_char(const u64 *const bitvector, u64 indx) {
+    return (bitvector[indx / 32] >> ((indx % 32) * 2)) & 0b11;
+}
+//extracts indx u5 within sector
+//> least significant end | <40 bits of packed u5s><12 bits PSS offset><12 bits NSS offset> | most significant end
+inline u32 gpu_get_lcs_u5(const u64 sector, i32 indx){
+    return (sector >> (indx * 5)) & 0b11111;
+}
 } // namespace sbwt_lcs_gpu
